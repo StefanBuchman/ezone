@@ -65,6 +65,60 @@ pending: dict | None = None
 pending_at: float = 0.0
 PENDING_PATH = None  # set at startup, lives in DATA_DIR
 
+# Intent overlay: the tablet takes several seconds to apply a delivered write
+# to its own reported state. Each accepted write is remembered here and wins
+# over observed state until the tablet confirms it (or the TTL expires, at
+# which point the UI honestly reverts).
+recent: list[dict] = []  # {"path": [...], "value": v, "ts": float}
+RECENT_TTL = 45
+
+
+def _flatten_change(change: dict, prefix: tuple = ()) -> list[tuple]:
+    out = []
+    for key, value in change.items():
+        if isinstance(value, dict):
+            out.extend(_flatten_change(value, prefix + (key,)))
+        else:
+            out.append((prefix + (key,), value))
+    return out
+
+
+def _note_recent(ac_change: dict) -> None:
+    """Remember a delivered write until the tablet's state reflects it."""
+    now = time.time()
+    entries = _flatten_change(ac_change)
+    paths = {p for p, _ in entries}
+    recent[:] = [e for e in recent if tuple(e["path"]) not in paths]
+    recent.extend({"path": list(p), "value": v, "ts": now} for p, v in entries)
+
+
+def _get_path(node, path):
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def _prune_recent() -> None:
+    """Drop intent entries the tablet has confirmed, plus expired ones."""
+    now = time.time()
+    ac = cache.data["aircons"]["ac1"] if cache.data else {}
+    kept = []
+    for e in recent:
+        if now - e["ts"] > RECENT_TTL:
+            continue
+        current = _get_path(ac, e["path"])
+        if e["path"][-1] in ("countDownToOff", "countDownToOn"):
+            # the tablet immediately ticks countdowns below the set value
+            v = e["value"]
+            if (v == 0 and not current) or (v > 0 and current and 0 < current <= v):
+                continue
+        elif current == e["value"]:
+            continue
+        kept.append(e)
+    recent[:] = kept
+
 
 def _load_pending() -> None:
     global pending, pending_at
@@ -92,12 +146,19 @@ def _queue_change(ac_change: dict) -> None:
 
 
 def _effective_data() -> dict | None:
-    """Last-known state with any pending (undelivered) change layered on top."""
+    """Last-observed state, with delivered-but-unconfirmed intent layered on,
+    then undelivered (queued) intent on top of that."""
     if cache.data is None:
         return None
     data = copy.deepcopy(cache.data)
+    ac = data["aircons"]["ac1"]
+    for e in recent:
+        node = ac
+        for key in e["path"][:-1]:
+            node = node.setdefault(key, {})
+        node[e["path"][-1]] = e["value"]
     if pending:
-        _deep_merge(data["aircons"]["ac1"], pending)
+        _deep_merge(ac, pending)
     return data
 
 
@@ -153,6 +214,7 @@ async def _refresh() -> None:
         cache.fetched_at = time.time()
         cache.ok = True
         cache.error = ""
+        _prune_recent()
         await asyncio.to_thread(_record_snapshot, data)
         await asyncio.to_thread(
             _last_state_path().write_text, json.dumps({"at": cache.fetched_at, "data": data})
@@ -225,10 +287,11 @@ async def _deliver_loop() -> None:
         if pending is None:
             continue
         try:
-            await client.set_aircon({"ac1": copy.deepcopy(pending)})
+            delivered = copy.deepcopy(pending)
+            await client.set_aircon({"ac1": delivered})
+            _note_recent(delivered)  # hold the display until the tablet confirms
             pending = None
             _save_pending()
-            await asyncio.sleep(1.0)
             await _refresh()
         except EzoneError:
             pass  # still asleep; try again next round
@@ -278,6 +341,7 @@ def _state_payload() -> dict:
         "mqtt": feed.connected if feed else None,
         "pending": pending is not None,
         "pendingAgeSeconds": round(time.time() - pending_at, 1) if pending else None,
+        "recentPaths": [e["path"] for e in recent],
         "outdoor": outdoor["temp"] if time.time() - outdoor["at"] < 7200 else None,
         "data": data,
     }
@@ -384,9 +448,9 @@ async def set_aircon(change: AirconChange):
         cache.ok = False
         return {"queued": True, **_state_payload()}
 
-    # The tablet takes a beat to reflect changes; give it one, then re-read.
-    await asyncio.sleep(1.0)
-    await _refresh()
+    # Respond immediately: the intent overlay covers the tablet's apply lag,
+    # and the poll loop confirms (and releases) it within a cycle.
+    _note_recent(payload["ac1"])
     return {"ack": ack, "queued": False, **_state_payload()}
 
 
@@ -438,6 +502,43 @@ async def today():
         prev_ts, prev_state = ts, st
     step = max(1, len(series) // 48)
     return {"runtimeSeconds": runtime, "cycles": cycles, "series": series[::step]}
+
+
+@app.get("/api/temps")
+async def temps(hours: int = Query(24, ge=1, le=168)):
+    """Per-zone measured-temperature series (bucket-averaged) for the chart."""
+    since = int(time.time()) - hours * 3600
+    bucket = max(300, hours * 3600 // 96)
+    rows = db.execute(
+        "SELECT ts, zones FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
+    ).fetchall()
+    acc: dict[str, dict[int, list]] = {}
+    for ts, zones_json in rows:
+        try:
+            zones = json.loads(zones_json)
+        except ValueError:
+            continue
+        b = ts - ts % bucket
+        for zid, z in zones.items():
+            t = z.get("measuredTemp")
+            if t in (None, 0):
+                continue
+            slot = acc.setdefault(zid, {}).setdefault(b, [0.0, 0])
+            slot[0] += t
+            slot[1] += 1
+    names = {}
+    if cache.data:
+        names = {zid: z["name"] for zid, z in cache.data["aircons"]["ac1"]["zones"].items()}
+    return {
+        "hours": hours,
+        "zones": {
+            zid: {
+                "name": names.get(zid, zid),
+                "points": [[b, round(s / c, 2)] for b, (s, c) in sorted(buckets.items())],
+            }
+            for zid, buckets in acc.items()
+        },
+    }
 
 
 @app.get("/api/health")

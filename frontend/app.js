@@ -24,8 +24,10 @@ const state = {
   scenes: null,
   system: null,
   today: null,
+  temps: null,
   interacting: false,
   tempTimer: null,
+  sent: new Map(), // pathKey -> {value, ts}; for the honest-revert toast
 };
 
 /* ================= theme ================= */
@@ -390,12 +392,48 @@ function renderFoot() {
     (state.remote?.pending ? " · change queued, delivering when the tablet wakes" : "");
 }
 
+/* syncing cues: driven entirely by the server's unconfirmed-intent list */
+function renderSyncCues() {
+  document.querySelectorAll(".pending").forEach((el) => el.classList.remove("pending"));
+  for (const path of state.remote?.recentPaths || []) {
+    const key = path.join(".");
+    let el = null;
+    if (key === "info.setTemp") el = $("dial");
+    else if (key === "info.mode") el = $("modeGrid");
+    else if (key === "info.fan") el = $("fanChips");
+    else if (key.startsWith("info.countDown")) el = $("timerChips");
+    else if (key === "info.state") el = $("powerBtn");
+    else if (path[0] === "zones") el = document.getElementById(`zone-${path[1]}`);
+    el?.classList.add("pending");
+  }
+}
+
+/* if an intent vanished without the state matching what we asked for,
+   the tablet rejected/ignored it — say so once instead of silently flipping */
+function checkReverts() {
+  if (!state.remote || !state.local) return;
+  const active = new Set((state.remote.recentPaths || []).map((p) => p.join(".")));
+  for (const [key, sent] of state.sent) {
+    if (Date.now() - sent.ts > 90000) { state.sent.delete(key); continue; }
+    if (active.has(key)) continue;
+    const current = key.split(".").reduce((n, k) => (n == null ? n : n[k]), state.local);
+    const confirmed = key.includes("countDown")
+      ? (sent.value === 0 ? !current : current > 0 && current <= sent.value)
+      : current === sent.value;
+    if (!confirmed && !state.remote.pending) {
+      toast("The tablet didn't take that change — showing its actual state.", true);
+    }
+    state.sent.delete(key);
+  }
+}
+
 function render() {
   if (!state.local) return;
   renderHero();
   renderZones();
   renderHeader();
   renderToday();
+  renderSyncCues();
   renderFoot();
 }
 
@@ -416,12 +454,66 @@ async function fetchState(refresh = false) {
     state.scenes = payload.data.myScenes;
     state.system = payload.data.system;
     setDot(payload.ok ? (payload.ageSeconds > 90 ? "stale" : "") : "down");
+    checkReverts();
     render();
     renderScenes();
   } catch (err) {
     setDot("down");
     toast(`Can't reach the system: ${err.message}`, true);
   }
+}
+
+const ZONE_COLORS = ["var(--cool)", "var(--acc)", "var(--ok)"];
+
+async function fetchTemps() {
+  try {
+    const res = await fetch("/api/temps?hours=24");
+    if (res.ok) { state.temps = await res.json(); renderTemps(); }
+  } catch { /* non-critical */ }
+}
+
+function renderTemps() {
+  const card = $("tempsCard");
+  const zones = Object.entries(state.temps?.zones || {})
+    .filter(([, z]) => z.points.length >= 2)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (!zones.length) { card.hidden = true; return; }
+  card.hidden = false;
+
+  const svg = $("tempChart");
+  const W = Math.max(svg.clientWidth || 300, 200), H = 120;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const now = Date.now() / 1000;
+  const t0 = now - (state.temps.hours || 24) * 3600;
+  const all = zones.flatMap(([, z]) => z.points.map((p) => p[1]));
+  let lo = Math.min(...all), hi = Math.max(...all);
+  const mid = (lo + hi) / 2;
+  const span = Math.max(hi - lo, 2);
+  lo = mid - span / 2 - 0.3; hi = mid + span / 2 + 0.3;
+
+  const X = (ts) => 30 + ((ts - t0) / (now - t0)) * (W - 34);
+  const Y = (v) => 8 + (1 - (v - lo) / (hi - lo)) * (H - 30);
+
+  let out = "";
+  for (const frac of [0.25, 0.5, 0.75]) {
+    const v = lo + (hi - lo) * frac;
+    out += `<line class="grid" x1="30" x2="${W - 4}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" opacity="0.5"/>`;
+    out += `<text x="0" y="${(Y(v) + 3).toFixed(1)}">${v.toFixed(1)}&#176;</text>`;
+  }
+  zones.forEach(([, z], i) => {
+    const pts = z.points.map((p) => `${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+    const last = z.points[z.points.length - 1];
+    out += `<polyline points="${pts}" stroke="${ZONE_COLORS[i % ZONE_COLORS.length]}"/>`;
+    out += `<circle cx="${X(last[0]).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3" fill="${ZONE_COLORS[i % ZONE_COLORS.length]}"/>`;
+  });
+  out += `<text x="30" y="${H - 2}">24h ago</text>`;
+  out += `<text x="${W - 26}" y="${H - 2}">now</text>`;
+  svg.innerHTML = out;
+
+  $("tempsLegend").innerHTML = zones.map(([, z], i) => {
+    const vals = z.points.map((p) => p[1]);
+    return `<span><i style="background:${ZONE_COLORS[i % ZONE_COLORS.length]}"></i>${esc(z.name)} ${Math.min(...vals).toFixed(1)}&ndash;${Math.max(...vals).toFixed(1)}&deg;</span>`;
+  }).join("");
 }
 
 async function fetchToday() {
@@ -431,6 +523,8 @@ async function fetchToday() {
   } catch { /* non-critical */ }
 }
 
+let confirmTimer = null;
+
 async function sendChange(change, pendingEl = null) {
   if (change.info) Object.assign(state.local.info, change.info);
   if (change.zones) {
@@ -439,7 +533,7 @@ async function sendChange(change, pendingEl = null) {
     }
   }
   render();
-  pendingEl?.classList.add("pending");
+  pendingEl?.classList.add("pending"); // instant cue while the POST is in flight
   try {
     const res = await fetch("/api/aircon", {
       method: "POST",
@@ -448,6 +542,14 @@ async function sendChange(change, pendingEl = null) {
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || res.statusText);
+
+    // remember what we asked for, so a rejected change can be surfaced honestly
+    const now = Date.now();
+    for (const [k, v] of Object.entries(change.info || {})) state.sent.set(`info.${k}`, { value: v, ts: now });
+    for (const [zid, patch] of Object.entries(change.zones || {})) {
+      for (const [k, v] of Object.entries(patch)) state.sent.set(`zones.${zid}.${k}`, { value: v, ts: now });
+    }
+
     state.remote = payload;
     lastFetch = Date.now();
     if (payload.data) state.local = structuredClone(payload.data.aircons.ac1);
@@ -456,13 +558,14 @@ async function sendChange(change, pendingEl = null) {
       toast("Tablet is asleep — change queued, it will apply the moment it wakes.");
     } else {
       setDot("");
+      // confirm quickly instead of waiting for the 20s poll
+      clearTimeout(confirmTimer);
+      confirmTimer = setTimeout(() => fetchState(true), 4000);
     }
     render();
   } catch (err) {
     toast(err.message, true);
     await fetchState(true);
-  } finally {
-    pendingEl?.classList.remove("pending");
   }
 }
 
@@ -539,10 +642,12 @@ function init() {
   initDialDrag();
   fetchState();
   fetchToday();
+  fetchTemps();
   setInterval(() => {
     if (!document.hidden && !state.interacting) fetchState();
   }, POLL_MS);
   setInterval(fetchToday, 5 * 60 * 1000);
+  setInterval(fetchTemps, 5 * 60 * 1000);
   setInterval(renderFoot, 5000);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) fetchState(true);
