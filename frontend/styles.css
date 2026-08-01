@@ -118,6 +118,29 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px; pointer-events: none; text-align: center;
 }
+.dial-lock {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--chip); color: var(--dim);
+  display: flex; align-items: center; justify-content: center;
+  transition: color 0.2s, box-shadow 0.2s;
+}
+.dial-lock.unlocked { color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; }
+.dial-lock.nudge { animation: locknudge 0.35s ease; }
+@keyframes locknudge {
+  0%, 100% { transform: translateX(-50%); }
+  25% { transform: translateX(calc(-50% - 4px)); }
+  60% { transform: translateX(calc(-50% + 4px)); }
+}
+.dial-wrap.locked { cursor: default; }
+.stepper-row .step-btn.locked { opacity: 0.4; cursor: default; }
+
+.filter-btn {
+  text-align: left; padding: 0; margin-top: 1px;
+  text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.filter-btn.warn { color: var(--warn); }
+.filter-btn.confirm { color: var(--acc); }
 .dial-center .delta-chip { margin-top: 2px; }
 
 /* ---- stepper row ---- */

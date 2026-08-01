@@ -45,6 +45,12 @@
       </svg>
       <span class="dial-lab min">16&deg;</span>
       <span class="dial-lab max">32&deg;</span>
+      <button class="dial-lock" id="dialLock" aria-label="Unlock temperature dial" aria-pressed="true">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="5" y="11" width="14" height="9" rx="2"/>
+          <path id="shackle" d="M8 11V8a4 4 0 0 1 8 0v3"/>
+        </svg>
+      </button>
       <div class="dial-center">
         <span class="lbl">Set to</span>
         <div class="setpoint"><span id="setTemp">--</span>&deg;</div>
@@ -85,6 +91,7 @@
       <div class="lbl" id="todayTitle">Runtime today</div>
       <div class="today-big" id="todayRuntime">0m</div>
       <div class="lbl" id="todaySub"></div>
+      <button class="lbl filter-btn" id="filterBtn" hidden></button>
     </div>
     <svg id="spark" width="118" height="38" viewBox="0 0 118 38" aria-label="Hours the system ran today"></svg>
   </section>

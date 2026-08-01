@@ -125,6 +125,46 @@ function renderDial(setTemp, mode) {
   }
 }
 
+/* dial lock: the drag surface is a scroll hazard, so setpoint changes are
+   gated behind an explicit unlock that re-arms itself after 15s idle */
+const lock = { locked: true, timer: null, warned: false };
+
+function renderLock() {
+  const btn = $("dialLock");
+  btn.classList.toggle("unlocked", !lock.locked);
+  btn.setAttribute("aria-pressed", String(lock.locked));
+  btn.setAttribute("aria-label", lock.locked ? "Unlock temperature dial" : "Lock temperature dial");
+  $("shackle").setAttribute("d", lock.locked ? "M8 11V8a4 4 0 0 1 8 0v3" : "M8 11V8a4 4 0 0 1 8 0");
+  $("dial").classList.toggle("locked", lock.locked);
+  $("tempDown").classList.toggle("locked", lock.locked);
+  $("tempUp").classList.toggle("locked", lock.locked);
+}
+
+function armRelock() {
+  clearTimeout(lock.timer);
+  lock.timer = setTimeout(() => { lock.locked = true; renderLock(); }, 15000);
+}
+
+function lockedNudge() {
+  const btn = $("dialLock");
+  btn.classList.remove("nudge");
+  void btn.offsetWidth; // restart the animation
+  btn.classList.add("nudge");
+  if (!lock.warned) {
+    lock.warned = true;
+    toast("Dial is locked — tap the padlock to adjust the temperature.");
+  }
+}
+
+function initDialLock() {
+  renderLock();
+  $("dialLock").addEventListener("click", () => {
+    lock.locked = !lock.locked;
+    renderLock();
+    if (!lock.locked) armRelock();
+  });
+}
+
 function initDialDrag() {
   const wrap = $("dial");
   let dragging = false, moved = false;
@@ -142,6 +182,9 @@ function initDialDrag() {
 
   wrap.addEventListener("pointerdown", (e) => {
     if (!state.local) return;
+    if (e.target.closest(".dial-lock")) return; // the lock button is not a drag
+    if (lock.locked) { lockedNudge(); return; }
+    armRelock();
     dragging = true; moved = false;
     wrap.classList.add("dragging");
     wrap.setPointerCapture(e.pointerId);
@@ -361,6 +404,44 @@ function renderHeader() {
 }
 
 const MODE_TITLES = { heat: "Heating today", cool: "Cooling today", vent: "Venting today", dry: "Drying today" };
+const FILTER_WARN_HOURS = 200; // typical clean-the-return-filter interval
+
+/* our own filter counter: unit runtime hours since the user last marked it
+   cleaned (the tablet's built-in reminder is installer-configured and was
+   never enabled on this system). Tap once to arm, tap again to reset. */
+const filterUi = { confirm: false, timer: null };
+
+function renderFilter(t) {
+  const btn = $("filterBtn");
+  if (t.filterRuntimeSeconds == null) { btn.hidden = true; return; }
+  btn.hidden = false;
+  if (filterUi.confirm) {
+    btn.textContent = "mark filter cleaned?";
+    btn.className = "lbl filter-btn confirm";
+    return;
+  }
+  const hours = t.filterRuntimeSeconds / 3600;
+  const shown = hours < 1 ? "<1h" : `${Math.round(hours)}h`;
+  const due = hours >= FILTER_WARN_HOURS;
+  const tabletDue = state.local?.info?.filterCleanStatus;
+  btn.textContent = `filter ${shown} since clean${due ? " · clean soon" : ""}${tabletDue ? " · tablet says due" : ""}`;
+  btn.className = `lbl filter-btn${due || tabletDue ? " warn" : ""}`;
+}
+
+async function markFilterCleaned() {
+  try {
+    const res = await fetch("/api/filter/cleaned", { method: "POST" });
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    if (state.today) {
+      state.today.filterRuntimeSeconds = data.filterRuntimeSeconds;
+      state.today.filterCleanedAt = data.filterCleanedAt;
+    }
+    toast("Filter counter reset — nice work.");
+  } catch (err) {
+    toast(`Couldn't reset the filter counter: ${err.message}`, true);
+  }
+}
 
 function renderToday() {
   const card = $("todayCard");
@@ -373,13 +454,13 @@ function renderToday() {
     modes.length === 1 ? (MODE_TITLES[modes[0]] || "Runtime today") : "Runtime today";
   $("todayRuntime").textContent = fmtMins(Math.round(t.runtimeSeconds / 60));
 
-  const filter = state.local?.info?.filterCleanStatus ? "filter due" : "filter ok";
   const parts = [];
   if (modes.length > 1) {
     parts.push(modes.map((m) => `${m} ${fmtMins(Math.round(t.byMode[m] / 60))}`).join(" · "));
   }
-  parts.push(`${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"}`, filter);
+  parts.push(`${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"}`);
   $("todaySub").textContent = parts.join(" · ");
+  renderFilter(t);
 
   // hourly runtime strip: one bar per hour of today, height = minutes run
   const svg = $("spark");
@@ -648,6 +729,8 @@ function buildControls() {
 
 function nudge(delta) {
   if (!state.local) return;
+  if (lock.locked) { lockedNudge(); return; }
+  armRelock();
   const info = state.local.info;
   info.setTemp = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(info.setTemp) + delta));
   renderHero();
@@ -658,7 +741,19 @@ function init() {
   initTheme();
   buildDial();
   buildControls();
+  initDialLock();
   initDialDrag();
+  $("filterBtn").addEventListener("click", async () => {
+    if (filterUi.confirm) {
+      clearTimeout(filterUi.timer);
+      filterUi.confirm = false;
+      await markFilterCleaned();
+    } else {
+      filterUi.confirm = true;
+      filterUi.timer = setTimeout(() => { filterUi.confirm = false; renderFilter(state.today || {}); }, 4000);
+    }
+    renderFilter(state.today || {});
+  });
   fetchState();
   fetchToday();
   fetchTemps();

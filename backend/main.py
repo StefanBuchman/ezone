@@ -255,6 +255,36 @@ async def _poll_loop() -> None:
 
 outdoor = {"temp": None, "at": 0.0}
 
+# Filter tracking: the tablet's own reminder counter is installer-configured
+# and typically never enabled, so we count unit runtime hours ourselves from
+# a user-set "last cleaned" mark.
+filter_state = {"cleanedAt": 0}
+
+
+def _filter_path() -> Path:
+    return DATA_DIR / "filter.json"
+
+
+def _load_filter() -> None:
+    try:
+        filter_state.update(json.loads(_filter_path().read_text()))
+    except (OSError, ValueError):
+        filter_state["cleanedAt"] = int(time.time())
+        _filter_path().write_text(json.dumps(filter_state))
+
+
+def _runtime_since(since: int) -> int:
+    rows = db.execute(
+        "SELECT ts, state FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
+    ).fetchall()
+    total = 0
+    prev_ts = prev_state = None
+    for ts, st in rows:
+        if prev_ts is not None and prev_state == "on":
+            total += min(ts - prev_ts, POLL_SECONDS * 4)
+        prev_ts, prev_state = ts, st
+    return total
+
 
 async def _outdoor_loop() -> None:
     """Real outdoor temperature via Open-Meteo (the tablet's suburb feed can
@@ -306,6 +336,7 @@ async def lifespan(app: FastAPI):
     _load_pending()
     _load_last_state()
     db = _init_db()
+    _load_filter()
     tasks = [
         asyncio.create_task(_poll_loop()),
         asyncio.create_task(_deliver_loop()),
@@ -503,7 +534,16 @@ async def today():
         "byMode": {m: s for m, s in by_mode.items() if m and s},
         "hourly": [[h, s] for h, s in sorted(hourly.items())],
         "hourNow": (int(time.time()) - midnight) // 3600,
+        "filterRuntimeSeconds": await asyncio.to_thread(_runtime_since, filter_state["cleanedAt"]),
+        "filterCleanedAt": filter_state["cleanedAt"],
     }
+
+
+@app.post("/api/filter/cleaned")
+async def filter_cleaned():
+    filter_state["cleanedAt"] = int(time.time())
+    _filter_path().write_text(json.dumps(filter_state))
+    return {"filterCleanedAt": filter_state["cleanedAt"], "filterRuntimeSeconds": 0}
 
 
 @app.get("/api/temps")
