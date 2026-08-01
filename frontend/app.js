@@ -60,10 +60,32 @@ function roomReading() {
   return null;
 }
 
+function autoLoop() {
+  // aggregate the control loop's own per-zone verdicts (sensor zones only)
+  let active = false, calling = false;
+  if (state.local) {
+    for (const z of Object.values(state.local.zones)) {
+      if (!z.auto) continue;
+      if (!z.auto.suspended) active = true;
+      if (z.auto.calling) calling = true;
+    }
+  }
+  return { active, calling };
+}
+
 function statusText(info, room, target) {
   if (info.state !== "on") return "off";
   if (info.mode === "vent") return "venting";
   if (info.mode === "dry") return "drying";
+  if (autoState().enabled) {
+    // mirror the loop (±0.3 hysteresis, latched) instead of guessing
+    // against it — the loop keeps calling until the room passes the band
+    const loop = autoLoop();
+    if (loop.active) {
+      if (loop.calling) return info.mode === "heat" ? "heating · auto" : "cooling · auto";
+      return "holding";
+    }
+  }
   if (room) {
     if (info.mode === "heat" && room.temperature < target - 0.2) return "heating";
     if (info.mode === "cool" && room.temperature > target + 0.2) return "cooling";
@@ -259,11 +281,17 @@ function renderHero() {
   else if (!room) delta = st;
   else {
     const dd = value - room.temperature;
-    if (Math.abs(dd) <= 0.2) delta = "at temperature";
+    const loop = auto.enabled ? autoLoop() : { active: false, calling: false };
+    if (loop.active) {
+      // speak with the loop's voice: it calls until the band is passed
+      if (loop.calling) delta = dd >= 0 ? `+${dd.toFixed(1)}&deg; to go` : `${(-dd).toFixed(1)}&deg; over`;
+      else delta = "at temperature";
+    }
+    else if (Math.abs(dd) <= 0.2) delta = "at temperature";
     else if (dd > 0) delta = `+${dd.toFixed(1)}&deg; to go`;
     else delta = `${dd.toFixed(1)}&deg; over`;
   }
-  if (on && st !== "standby") {
+  if (on && st !== "standby" && st !== "holding") {
     color = info.mode === "heat" ? "var(--acc)" : info.mode === "vent" ? "var(--ok)" : "var(--cool)";
   }
   chip.innerHTML = delta;

@@ -300,6 +300,14 @@ def _load_auto() -> None:
             }
     except (OSError, ValueError, TypeError):
         auto_cfg = {"enabled": False, "target": 21.0}
+        return
+    # Restore autopilot ownership so a redeploy doesn't forget the unit is
+    # auto's to power off (the timestamps keep min-run/min-off honest too).
+    p = stored.get("pilot") if isinstance(stored, dict) else None
+    if isinstance(p, dict):
+        pilot.owns_power = bool(p.get("owns_power"))
+        pilot.last_on = float(p.get("last_on", 0.0))
+        pilot.last_off = float(p.get("last_off", 0.0))
 
 
 def _pilot_cfg() -> dict:
@@ -314,7 +322,14 @@ def _pilot_cfg() -> dict:
 
 
 def _save_auto() -> None:
-    _auto_path().write_text(json.dumps(auto_cfg))
+    _auto_path().write_text(json.dumps({
+        **auto_cfg,
+        "pilot": {
+            "owns_power": pilot.owns_power,
+            "last_on": pilot.last_on,
+            "last_off": pilot.last_off,
+        },
+    }))
 
 
 def _active_overrides() -> set:
@@ -363,7 +378,10 @@ async def _auto_tick() -> None:
     readings = {
         zid: feed.reading_for_zone(zid, z["name"]) for zid, z in ac["zones"].items()
     }
+    before = (pilot.owns_power, pilot.last_on, pilot.last_off)
     change, logs = pilot.tick(_pilot_cfg(), ac, readings, _active_overrides(), time.time())
+    if (pilot.owns_power, pilot.last_on, pilot.last_off) != before:
+        await asyncio.to_thread(_save_auto)
     for line in logs:
         await asyncio.to_thread(_auto_log, "decide", line)
     if not change:
