@@ -205,8 +205,9 @@ function renderHero() {
   chip.style.color = color;
 
   const pwr = $("powerBtn");
-  pwr.classList.toggle("off", !on);
+  pwr.classList.toggle("on", on);
   pwr.title = on ? "Turn off" : "Turn on";
+  $("dial").classList.toggle("off", !on);
 
   document.querySelectorAll(".mode-pill").forEach((b) => {
     b.classList.toggle("active", b.dataset.mode === info.mode);

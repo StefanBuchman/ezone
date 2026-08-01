@@ -30,7 +30,7 @@ body {
   font-family: "Space Grotesk", system-ui, sans-serif;
   font-size: 14px; line-height: 1.4;
   min-height: 100dvh;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
   transition: background 0.25s, color 0.25s;
 }
 button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
@@ -38,7 +38,8 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 .page {
   max-width: 430px; margin: 0 auto;
-  padding: 16px 18px 34px;
+  /* bottom: safe-area and padding share, not stack */
+  padding: 16px 18px max(20px, env(safe-area-inset-bottom, 20px));
   display: flex; flex-direction: column; gap: 16px;
 }
 
@@ -135,8 +136,12 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
   transition: background 0.18s, color 0.18s, transform 0.12s;
   background: var(--chip); color: var(--dim);
 }
-.pwr-btn.off { background: var(--acc); color: #fff; }
+.pwr-btn.on { background: var(--acc); color: #fff; }
 .pwr-btn:active { transform: scale(0.92); }
+
+/* whole hero goes quiet when the system is off */
+#dialArc, #handleO, #handleI { transition: opacity 0.3s; }
+.dial-wrap.off #dialArc, .dial-wrap.off #handleO, .dial-wrap.off #handleI { opacity: 0.4; }
 
 /* ---- mode grid ---- */
 .mode-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
