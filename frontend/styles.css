@@ -125,7 +125,7 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
   display: flex; align-items: center; justify-content: center;
   transition: color 0.2s, box-shadow 0.2s;
 }
-.dial-lock.unlocked { color: var(--acc); box-shadow: 0 0 0 1px var(--acc) inset; }
+.dial-lock.unlocked { color: var(--acc); }
 .dial-lock.nudge { animation: locknudge 0.35s ease; }
 @keyframes locknudge {
   0%, 100% { transform: translateX(-50%); }
@@ -243,6 +243,19 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 }
 .ztog.on::after { left: 22px; }
 .ztog:disabled { opacity: 0.45; cursor: not-allowed; }
+.zone-auto-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.zone-auto-row[hidden] { display: none; }
+.auto-controls { display: inline-flex; align-items: center; gap: 6px; }
+.auto-controls[hidden] { display: none; }
+.auto-step { padding: 7px 12px; }
+.auto-target {
+  font-size: 13px; font-weight: 600; min-width: 46px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.auto-status { margin-left: auto; font-size: 11px; color: var(--dim); }
+.auto-status.warn { color: var(--warn); }
+.chip-sm.ok { color: var(--ok); }
+
 .zone-slider-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
 .zone-slider-row.hidden { display: none; }
 .zone-slider-row .pct { font-size: 11px; font-weight: 600; min-width: 36px; text-align: right; }

@@ -11,8 +11,11 @@ import asyncio
 import copy
 import json
 import os
+import logging
 import sqlite3
+import threading
 import time
+import typing
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -22,6 +25,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .autopilot import Autopilot
 from .ezone import EzoneClient, EzoneError, _deep_merge
 from .sensors import SensorFeed
 
@@ -56,7 +60,9 @@ class Cache:
 cache = Cache()
 client: EzoneClient | None = None
 db: sqlite3.Connection | None = None
+db_lock = threading.Lock()  # one connection shared across threads
 feed: SensorFeed | None = None
+log = logging.getLogger("uvicorn.error")
 
 # Store-and-forward queue: the tablet sleeps its Wi-Fi, so changes made while
 # it's unreachable are held as one merged pending diff and delivered as soon
@@ -164,7 +170,9 @@ def _effective_data() -> dict | None:
 
 def _init_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DATA_DIR / "ezone.db", check_same_thread=False)
+    conn = sqlite3.connect(DATA_DIR / "ezone.db", check_same_thread=False, timeout=10)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS snapshots (
             ts INTEGER PRIMARY KEY,
@@ -187,20 +195,21 @@ def _record_snapshot(data: dict) -> None:
             "measuredTemp": reading["temperature"] if reading and not reading["stale"] else None,
             "humidity": reading["humidity"] if reading and not reading["stale"] else None,
         }
-    db.execute(
-        "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
-        (
-            int(time.time()),
-            info.get("state"),
-            info.get("mode"),
-            info.get("setTemp"),
-            info.get("fan"),
-            json.dumps(zones),
-            info.get("airconErrorCode", ""),
-            info.get("filterCleanStatus", 0),
-        ),
-    )
-    db.commit()
+    with db_lock:
+        db.execute(
+            "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
+            (
+                int(time.time()),
+                info.get("state"),
+                info.get("mode"),
+                info.get("setTemp"),
+                info.get("fan"),
+                json.dumps(zones),
+                info.get("airconErrorCode", ""),
+                info.get("filterCleanStatus", 0),
+            ),
+        )
+        db.commit()
 
 
 def _last_state_path() -> Path:
@@ -227,11 +236,12 @@ async def _refresh() -> None:
 
 def _record_offline() -> None:
     """Log failed polls too, so tablet sleep behaviour can be measured."""
-    db.execute(
-        "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
-        (int(time.time()), "unreachable", None, None, None, "{}", "", 0),
-    )
-    db.commit()
+    with db_lock:
+        db.execute(
+            "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
+            (int(time.time()), "unreachable", None, None, None, "{}", "", 0),
+        )
+        db.commit()
 
 
 def _load_last_state() -> None:
@@ -260,6 +270,95 @@ outdoor = {"temp": None, "at": 0.0}
 # a user-set "last cleaned" mark.
 filter_state = {"cleanedAt": 0}
 
+# ---- Phase 2: closed-loop auto ----
+AUTO_INTERVAL = 60
+OVERRIDE_S = 3600  # manual changes silence auto on that scope for an hour
+
+pilot = Autopilot()
+auto_cfg: dict[str, dict] = {}   # zid -> {"enabled": bool, "target": float}
+overrides: dict[str, float] = {}  # scope -> expiry timestamp
+
+
+def _auto_path() -> Path:
+    return DATA_DIR / "auto.json"
+
+
+def _load_auto() -> None:
+    global auto_cfg
+    try:
+        auto_cfg = json.loads(_auto_path().read_text())
+    except (OSError, ValueError):
+        auto_cfg = {}
+
+
+def _save_auto() -> None:
+    _auto_path().write_text(json.dumps(auto_cfg))
+
+
+def _active_overrides() -> set:
+    now = time.time()
+    for scope in [s for s, exp in overrides.items() if exp <= now]:
+        del overrides[scope]
+    return set(overrides)
+
+
+def _mark_overrides(change: dict) -> None:
+    """A user-made change silences auto on the touched scopes for an hour."""
+    exp = time.time() + OVERRIDE_S
+    info = change.get("info", {})
+    if "state" in info or "countDownToOff" in info or "countDownToOn" in info:
+        overrides["power"] = exp
+    if "setTemp" in info:
+        overrides["setTemp"] = exp
+    for zid in change.get("zones", {}):
+        overrides[f"zone:{zid}"] = exp
+
+
+def _auto_log(action: str, reason: str) -> None:
+    try:
+        with db_lock:
+            db.execute("INSERT INTO auto_log VALUES (?,?,?)", (int(time.time()), action, reason))
+            db.commit()
+    except sqlite3.Error:
+        log.warning("auto_log write failed: %s %s", action, reason)
+
+
+async def _auto_loop() -> None:
+    while True:
+        await asyncio.sleep(AUTO_INTERVAL)
+        try:
+            await _auto_tick()
+        except Exception:  # noqa: BLE001 — the loop must never die
+            log.exception("auto tick failed")
+
+
+async def _auto_tick() -> None:
+    if not any(c.get("enabled") for c in auto_cfg.values()):
+        return
+    if not cache.ok or cache.data is None or feed is None:
+        return  # tablet asleep or no sensors: stand down this tick
+    ac = cache.data["aircons"]["ac1"]
+    readings = {
+        zid: feed.reading_for_zone(zid, z["name"]) for zid, z in ac["zones"].items()
+    }
+    change, logs = pilot.tick(auto_cfg, ac, readings, _active_overrides(), time.time())
+    for line in logs:
+        await asyncio.to_thread(_auto_log, "decide", line)
+    if not change:
+        return
+    try:
+        payload = _validate_change(AirconChange(**change))
+    except HTTPException as exc:
+        await asyncio.to_thread(_auto_log, "blocked", f"{change} -> {exc.detail}")
+        return
+    try:
+        await client.set_aircon(payload)
+        _note_recent(payload["ac1"])
+        await asyncio.to_thread(_auto_log, "apply", json.dumps(change))
+        await _refresh()
+    except EzoneError as exc:
+        await asyncio.to_thread(_auto_log, "error", str(exc))
+
 
 def _filter_path() -> Path:
     return DATA_DIR / "filter.json"
@@ -274,9 +373,10 @@ def _load_filter() -> None:
 
 
 def _runtime_since(since: int) -> int:
-    rows = db.execute(
-        "SELECT ts, state FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
-    ).fetchall()
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, state FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
+        ).fetchall()
     total = 0
     prev_ts = prev_state = None
     for ts, st in rows:
@@ -336,13 +436,25 @@ async def lifespan(app: FastAPI):
     _load_pending()
     _load_last_state()
     db = _init_db()
+    db.execute("CREATE TABLE IF NOT EXISTS auto_log (ts INTEGER, action TEXT, reason TEXT)")
+    db.commit()
     _load_filter()
+    _load_auto()
     tasks = [
         asyncio.create_task(_poll_loop()),
         asyncio.create_task(_deliver_loop()),
         asyncio.create_task(_outdoor_loop()),
+        asyncio.create_task(_auto_loop()),
     ]
-    if MQTT_URL:
+    if EZONE_MOCK and os.environ.get("MOCK_SENSOR") == "1":
+        from .sensors import SimFeed
+
+        feed = SimFeed(
+            get_ac=lambda: client._mock_state["aircons"]["ac1"],
+            accel=float(os.environ.get("SIM_ACCEL", "6")),
+        )
+        tasks.append(asyncio.create_task(feed.run()))
+    elif MQTT_URL:
         feed = SensorFeed(MQTT_URL, SENSOR_MAP)
         tasks.append(asyncio.create_task(feed.run()))
     yield
@@ -364,6 +476,11 @@ def _state_payload() -> dict:
                 zone["sensor"] = reading
                 if not reading["stale"] and reading["temperature"] is not None:
                     zone["measuredTemp"] = reading["temperature"]
+    if data:
+        for zid, zone in data["aircons"]["ac1"]["zones"].items():
+            cfg = auto_cfg.get(zid)
+            if cfg:
+                zone["auto"] = {**cfg, **pilot.zone_status(zid)}
     return {
         "ok": cache.ok,
         "ageSeconds": round(time.time() - cache.fetched_at, 1) if cache.data else None,
@@ -465,6 +582,7 @@ async def set_aircon(change: AirconChange):
     if cache.data is None:
         await _refresh()
     payload = _validate_change(change)
+    _mark_overrides(payload["ac1"])  # manual wins: auto stands down on these scopes
 
     # If the tablet is known to be asleep, don't make the user wait through
     # a doomed retry cycle — queue immediately.
@@ -488,11 +606,12 @@ async def set_aircon(change: AirconChange):
 @app.get("/api/history")
 async def get_history(hours: int = Query(24, ge=1, le=24 * 30)):
     since = int(time.time()) - hours * 3600
-    rows = db.execute(
-        "SELECT ts, state, mode, set_temp, fan, zones, error_code, filter_status "
-        "FROM snapshots WHERE ts >= ? ORDER BY ts",
-        (since,),
-    ).fetchall()
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, state, mode, set_temp, fan, zones, error_code, filter_status "
+            "FROM snapshots WHERE ts >= ? ORDER BY ts",
+            (since,),
+        ).fetchall()
     return {
         "points": [
             {
@@ -510,9 +629,10 @@ async def today():
     """Today's runtime (total, per mode, per hour) and cycle count."""
     lt = time.localtime()
     midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
-    rows = db.execute(
-        "SELECT ts, state, mode FROM snapshots WHERE ts >= ? ORDER BY ts", (midnight,)
-    ).fetchall()
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, state, mode FROM snapshots WHERE ts >= ? ORDER BY ts", (midnight,)
+        ).fetchall()
     runtime = 0
     cycles = 0
     by_mode: dict[str, int] = {}
@@ -546,14 +666,57 @@ async def filter_cleaned():
     return {"filterCleanedAt": filter_state["cleanedAt"], "filterRuntimeSeconds": 0}
 
 
+class AutoChange(BaseModel):
+    zone: str
+    enabled: typing.Optional[bool] = None
+    target: typing.Optional[float] = None
+
+
+@app.post("/api/auto")
+async def set_auto(change: AutoChange):
+    if cache.data is None:
+        await _refresh()
+    zones = cache.data["aircons"]["ac1"]["zones"] if cache.data else {}
+    if change.zone not in zones:
+        raise HTTPException(422, f"unknown zone '{change.zone}'")
+    cfg = auto_cfg.setdefault(change.zone, {"enabled": False, "target": 21.0})
+    if change.target is not None:
+        cfg["target"] = max(16.0, min(32.0, round(change.target * 2) / 2))
+    if change.enabled is not None:
+        cfg["enabled"] = change.enabled
+        # engaging auto is consent for auto to act now on these scopes
+        if change.enabled:
+            for scope in ("power", "setTemp", f"zone:{change.zone}"):
+                overrides.pop(scope, None)
+        else:
+            pilot.calling.pop(change.zone, None)
+            pilot.suspended.pop(change.zone, None)
+    _save_auto()
+    await asyncio.to_thread(
+        _auto_log, "config",
+        f"{change.zone}: enabled={cfg['enabled']} target={cfg['target']}",
+    )
+    return _state_payload()
+
+
+@app.get("/api/auto/log")
+async def auto_log(limit: int = Query(50, ge=1, le=500)):
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, action, reason FROM auto_log ORDER BY ts DESC LIMIT ?", (limit,)
+        ).fetchall()
+    return {"entries": [{"ts": r[0], "action": r[1], "reason": r[2]} for r in rows]}
+
+
 @app.get("/api/temps")
 async def temps(hours: int = Query(24, ge=1, le=168)):
     """Per-zone measured-temperature series (bucket-averaged) for the chart."""
     since = int(time.time()) - hours * 3600
     bucket = max(300, hours * 3600 // 96)
-    rows = db.execute(
-        "SELECT ts, zones FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
-    ).fetchall()
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, zones FROM snapshots WHERE ts >= ? ORDER BY ts", (since,)
+        ).fetchall()
     acc: dict[str, dict[int, list]] = {}
     for ts, zones_json in rows:
         try:
@@ -585,10 +748,11 @@ async def temps(hours: int = Query(24, ge=1, le=168)):
 
 @app.get("/api/health")
 async def health():
-    total, offline = db.execute(
-        "SELECT COUNT(*), COALESCE(SUM(state = 'unreachable'), 0) FROM snapshots WHERE ts >= ?",
-        (int(time.time()) - 86400,),
-    ).fetchone()
+    with db_lock:
+        total, offline = db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(state = 'unreachable'), 0) FROM snapshots WHERE ts >= ?",
+            (int(time.time()) - 86400,),
+        ).fetchone()
     return {
         "app": "ok",
         "ezone": cache.ok,

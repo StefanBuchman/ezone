@@ -295,6 +295,15 @@ function renderZones() {
           </div>
           <button class="ztog" role="switch" aria-label="zone open"></button>
         </div>
+        <div class="zone-auto-row" hidden>
+          <button class="chip-btn auto-chip">auto</button>
+          <span class="auto-controls" hidden>
+            <button class="chip-btn auto-step" data-d="-0.5">&#8722;</button>
+            <span class="auto-target">21.0&deg;</span>
+            <button class="chip-btn auto-step" data-d="0.5">+</button>
+          </span>
+          <span class="auto-status"></span>
+        </div>
         <div class="zone-slider-row">
           <input type="range" min="5" max="100" step="5" aria-label="damper percentage">
           <span class="pct"></span>
@@ -314,6 +323,21 @@ function renderZones() {
       slider.addEventListener("change", () => {
         state.interacting = false;
         sendChange({ zones: { [zid]: { value: Number(slider.value) } } }, card);
+      });
+
+      card.querySelector(".auto-chip").addEventListener("click", () => {
+        const auto = state.local.zones[zid].auto || {};
+        sendAuto(zid, { enabled: !auto.enabled });
+      });
+      card.querySelectorAll(".auto-step").forEach((b) => {
+        b.addEventListener("click", () => {
+          const auto = state.local.zones[zid].auto || { target: 21 };
+          const target = Math.max(TEMP_MIN, Math.min(TEMP_MAX, (auto.target || 21) + Number(b.dataset.d)));
+          auto.target = target;
+          card.querySelector(".auto-target").innerHTML = `${target.toFixed(1)}&deg;`;
+          clearTimeout(state.autoTimer);
+          state.autoTimer = setTimeout(() => sendAuto(zid, { target }), 500);
+        });
       });
     }
 
@@ -336,13 +360,53 @@ function renderZones() {
     tog.disabled = on && isOpen && openCount === 1;
     tog.title = tog.disabled ? "At least one zone must stay open while the system is on" : "";
 
-    card.querySelector(".zone-slider-row").classList.toggle("hidden", !isOpen);
+    // auto row: only offered on sensor-equipped zones
+    const autoRow = card.querySelector(".zone-auto-row");
+    const auto = z.auto;
+    const hasSensor = !!(s && s.temperature != null);
+    autoRow.hidden = !hasSensor && !auto;
+    if (!autoRow.hidden) {
+      const enabled = !!auto?.enabled;
+      const chip = card.querySelector(".auto-chip");
+      chip.classList.toggle("active", enabled);
+      card.querySelector(".auto-controls").hidden = !enabled;
+      if (enabled) {
+        card.querySelector(".auto-target").innerHTML = `${Number(auto.target).toFixed(1)}&deg;`;
+      }
+      const statusEl = card.querySelector(".auto-status");
+      statusEl.textContent = !enabled ? ""
+        : auto.suspended ? `suspended: ${auto.suspended}`
+        : auto.calling ? "calling" : "holding";
+      statusEl.classList.toggle("warn", !!auto?.suspended);
+    }
+
+    const sliderRow = card.querySelector(".zone-slider-row");
+    sliderRow.classList.toggle("hidden", !isOpen || !!auto?.enabled);
     if (!state.interacting) {
       const slider = card.querySelector("input");
       slider.value = Number(z.value);
       slider.style.setProperty("--fill", `${Number(z.value)}%`);
       card.querySelector(".pct").textContent = `${Number(z.value)}%`;
     }
+  }
+}
+
+async function sendAuto(zid, patch) {
+  try {
+    const res = await fetch("/api/auto", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ zone: zid, ...patch }),
+    });
+    const payload = await res.json();
+    if (!res.ok) throw new Error(payload.detail || res.statusText);
+    state.remote = payload;
+    if (payload.data) state.local = structuredClone(payload.data.aircons.ac1);
+    render();
+    if (patch.enabled === true) toast("Auto engaged — the app now holds this zone's target.");
+    if (patch.enabled === false) toast("Auto off — zone back to manual control.");
+  } catch (err) {
+    toast(err.message, true);
   }
 }
 
@@ -383,6 +447,12 @@ function renderHeader() {
   if (state.remote?.mock) badges.push('<span class="chip-sm warn">mock</span>');
   if (state.remote?.pending) badges.push('<span class="chip-sm warn">queued</span>');
   if (state.remote?.mqtt === false) badges.push('<span class="chip-sm warn">sensors offline</span>');
+  const autoZones = Object.values(state.local?.zones || {}).map((z) => z.auto).filter(Boolean);
+  if (autoZones.some((a) => a.enabled && a.suspended)) {
+    badges.push('<span class="chip-sm warn">auto suspended</span>');
+  } else if (autoZones.some((a) => a.enabled)) {
+    badges.push('<span class="chip-sm ok">auto</span>');
+  }
   if (info?.filterCleanStatus) badges.push('<span class="chip-sm warn">filter due</span>');
   if (info?.airconErrorCode) badges.push(`<span class="chip-sm bad">err ${esc(info.airconErrorCode)}</span>`);
   $("badges").innerHTML = badges.join("");

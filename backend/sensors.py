@@ -77,3 +77,45 @@ class SensorFeed:
             return
         payload["ts"] = time.time()
         self.readings[name] = payload
+
+
+class SimFeed(SensorFeed):
+    """Mock-mode stand-in: simulated room sensors driven by a small thermal
+    model of the mock aircon, so the auto loop can be exercised end to end
+    without hardware. `accel` speeds the physics up relative to wall time."""
+
+    def __init__(self, get_ac, accel: float = 6.0, start_temp: float = 19.0):
+        super().__init__("mqtt://sim:1883")
+        self.get_ac = get_ac
+        self.accel = accel
+        self.temps: dict[str, float] = {}
+        self.start_temp = start_temp
+        self.connected = True
+
+    async def run(self) -> None:
+        import asyncio
+
+        step = 10.0
+        while True:
+            ac = self.get_ac()
+            on = ac["info"]["state"] == "on"
+            mode = ac["info"]["mode"]
+            for zid, zone in ac["zones"].items():
+                name = zone_sensor_name(zone["name"])
+                temp = self.temps.get(zid, self.start_temp)
+                dt_h = (step / 3600) * self.accel
+                flowing = on and zone["state"] == "open"
+                gain = 1.8 * (zone["value"] / 100) * dt_h if flowing else 0.0
+                if mode == "cool":
+                    gain = -gain
+                temp += gain - 0.6 * dt_h  # ambient loss pulls down
+                temp = max(12.0, min(32.0, temp))
+                self.temps[zid] = temp
+                self.readings[name] = {
+                    "temperature": round(temp, 2),
+                    "humidity": 45.0,
+                    "battery": 100,
+                    "linkquality": 200,
+                    "ts": time.time(),
+                }
+            await asyncio.sleep(step)
