@@ -380,6 +380,36 @@ async def get_history(hours: int = Query(24, ge=1, le=24 * 30)):
     }
 
 
+@app.get("/api/today")
+async def today():
+    """Today's runtime, cycle count, and room-temp series for the dashboard card."""
+    lt = time.localtime()
+    midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+    rows = db.execute(
+        "SELECT ts, state, zones FROM snapshots WHERE ts >= ? ORDER BY ts", (midnight,)
+    ).fetchall()
+    runtime = 0
+    cycles = 0
+    series: list[list] = []
+    prev_ts = prev_state = None
+    for ts, st, zones_json in rows:
+        if prev_ts is not None and prev_state == "on":
+            runtime += min(ts - prev_ts, POLL_SECONDS * 4)  # cap over gaps/outages
+        if st == "on" and prev_state != "on":
+            cycles += 1
+        try:
+            temps = [z.get("measuredTemp") for z in json.loads(zones_json).values()]
+            # pre-sensor rows recorded the tablet's constant 0.0 — not real readings
+            temps = [t for t in temps if t is not None and t != 0]
+        except (ValueError, AttributeError):
+            temps = []
+        if temps:
+            series.append([ts, temps[0]])
+        prev_ts, prev_state = ts, st
+    step = max(1, len(series) // 48)
+    return {"runtimeSeconds": runtime, "cycles": cycles, "series": series[::step]}
+
+
 @app.get("/api/health")
 async def health():
     total, offline = db.execute(

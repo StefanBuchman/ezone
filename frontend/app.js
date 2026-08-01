@@ -1,145 +1,210 @@
-/* e-zone control app */
+/* e-zone · concept 2a "Tape + Thermal" */
 "use strict";
 
-const MODES = {
-  heat: { rgb: "240, 135, 72",  hex: "#F08748", label: "heating" },
-  cool: { rgb: "88, 168, 206",  hex: "#58A8CE", label: "cooling" },
-  vent: { rgb: "99, 191, 163",  hex: "#63BFA3", label: "fan only" },
-  dry:  { rgb: "200, 164, 94",  hex: "#C8A45E", label: "drying" },
-};
 const TEMP_MIN = 16, TEMP_MAX = 32;
-const POLL_MS = 15000;
+const TAPE_MIN = 14, TAPE_MAX = 34, PX_PER_DEG = 28;
+const POLL_MS = 20000;
+const STALE_S = 600;
+
+const MODES = [
+  { id: "heat", label: "Heat", fill: true,
+    d: "M12 2.5c.5 2.9 2.3 4.5 3.8 6.2 1.5 1.7 2.7 3.4 2.7 5.8a6.5 6.5 0 1 1-13 0c0-1.8.7-3.3 1.7-4.7.3 1.3 1 2.2 2 2.7-.5-2.7.5-7 2.8-10z" },
+  { id: "cool", label: "Cool", fill: false, d: "M12 3.5v17M4.6 7.8l14.8 8.4M19.4 7.8L4.6 16.2" },
+  { id: "vent", label: "Vent", fill: false, d: "M3.5 8.5h9.7a2.9 2.9 0 1 0-2.9-2.9M3.5 13h13.7a3.1 3.1 0 1 1-3.1 3.1M3.5 17.5h6.5" },
+  { id: "dry",  label: "Dry",  fill: false, d: "M12 3.5c3.1 3.8 5.9 7 5.9 10.4a5.9 5.9 0 1 1-11.8 0C6.1 10.5 8.9 7.3 12 3.5z" },
+];
+const FANS = [["low", "low"], ["medium", "med"], ["high", "high"]];
+const TIMERS = [[30, "30m"], [60, "1h"], [90, "1.5h"], [120, "2h"]];
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  remote: null,        // last server payload ({ok, ageSeconds, mock, data})
-  local: null,         // optimistic copy of data.aircons.ac1
+  remote: null,
+  local: null,
   scenes: null,
   system: null,
-  tempTimer: null,     // debounce for setTemp stepper
-  interacting: false,  // true while a slider is being dragged
+  today: null,
+  interacting: false,
+  tempTimer: null,
 };
 
-/* ---------------- dial geometry ---------------- */
+/* ================= theme ================= */
 
-const DIAL = { cx: 150, cy: 150, r: 118, start: 150, sweep: 240 };
+function applyTheme(theme) {
+  if (theme === "l") document.documentElement.setAttribute("data-th", "l");
+  else document.documentElement.removeAttribute("data-th");
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = theme === "l" ? "#F1F0ED" : "#0A0D16";
+}
+function initTheme() {
+  const saved = localStorage.getItem("ezone-theme");
+  const preferLight = window.matchMedia("(prefers-color-scheme: light)").matches;
+  applyTheme(saved || (preferLight ? "l" : "d"));
+  $("themeBtn").addEventListener("click", () => {
+    const next = document.documentElement.hasAttribute("data-th") ? "d" : "l";
+    localStorage.setItem("ezone-theme", next);
+    applyTheme(next);
+  });
+}
 
-function polar(angleDeg, radius) {
-  const a = (angleDeg * Math.PI) / 180;
-  return [DIAL.cx + radius * Math.cos(a), DIAL.cy + radius * Math.sin(a)];
-}
-function arcPath(fromDeg, toDeg, radius) {
-  const [x1, y1] = polar(fromDeg, radius);
-  const [x2, y2] = polar(toDeg, radius);
-  const large = toDeg - fromDeg > 180 ? 1 : 0;
-  return `M ${x1} ${y1} A ${radius} ${radius} 0 ${large} 1 ${x2} ${y2}`;
-}
-function tempAngle(t) {
-  return DIAL.start + ((t - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) * DIAL.sweep;
-}
+/* ================= helpers ================= */
 
-function buildDial() {
-  const ticks = $("dialTicks");
-  let html = "";
-  for (let t = TEMP_MIN; t <= TEMP_MAX; t++) {
-    const angle = tempAngle(t);
-    const major = t % 4 === 0;
-    const [x1, y1] = polar(angle, DIAL.r + (major ? -14 : -11));
-    const [x2, y2] = polar(angle, DIAL.r - 18);
-    html += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${major ? 'opacity="1"' : 'opacity="0.45"'}/>`;
-    if (major) {
-      const [tx, ty] = polar(angle, DIAL.r - 32);
-      html += `<text x="${tx}" y="${ty}" text-anchor="middle" dominant-baseline="middle">${t}</text>`;
-    }
+function roomReading() {
+  if (!state.local) return null;
+  for (const z of Object.values(state.local.zones)) {
+    const s = z.sensor;
+    if (s && !s.stale && s.temperature != null) return s;
   }
-  ticks.innerHTML = html;
-  $("dialTrack").setAttribute("d", arcPath(DIAL.start, DIAL.start + DIAL.sweep, DIAL.r));
+  return null;
 }
 
-function renderDial(setTemp) {
-  const end = tempAngle(setTemp);
-  $("dialArc").setAttribute("d", arcPath(DIAL.start, Math.max(end, DIAL.start + 0.5), DIAL.r));
-  const [tx, ty] = polar(end, DIAL.r);
-  const tip = $("dialTip");
-  tip.setAttribute("cx", tx);
-  tip.setAttribute("cy", ty);
+function statusText(info, room) {
+  if (info.state !== "on") return "off";
+  if (info.mode === "vent") return "venting";
+  if (info.mode === "dry") return "drying";
+  if (room) {
+    if (info.mode === "heat" && room.temperature < info.setTemp - 0.2) return "heating";
+    if (info.mode === "cool" && room.temperature > info.setTemp + 0.2) return "cooling";
+    return "standby";
+  }
+  return info.mode === "heat" ? "heating" : "cooling";
 }
 
-/* ---------------- rendering ---------------- */
-
-function render() {
-  const ac = state.local;
-  if (!ac) return;
-  const info = ac.info;
-  const on = info.state === "on";
-  const mode = MODES[info.mode] ? info.mode : "heat";
-
-  document.body.classList.toggle("is-on", on);
-  document.body.classList.toggle("is-off", !on);
-  document.documentElement.style.setProperty("--accent", MODES[mode].hex);
-  document.documentElement.style.setProperty("--accent-rgb", MODES[mode].rgb);
-
-  $("setTemp").textContent = Math.round(info.setTemp);
-  $("dialMode").textContent = on ? MODES[mode].label : "standby";
-  $("dialLabel").textContent = info.mode === "vent" || info.mode === "dry" ? "mode" : "set to";
-  $("powerLabel").textContent = on ? "on" : "off";
-  renderDial(info.setTemp);
-
-  document.querySelectorAll("#modeSeg .seg-btn").forEach((b) => {
-    b.classList.toggle("active", b.dataset.mode === info.mode);
-    b.setAttribute("aria-checked", String(b.dataset.mode === info.mode));
-  });
-  document.querySelectorAll("#fanSeg .seg-btn").forEach((b) => {
-    b.classList.toggle("active", b.dataset.fan === info.fan);
-  });
-
-  renderZones(ac, on);
-  renderTimer(info, on);
-  renderBadges(info);
-  renderFoot();
-}
-
-function fmtDur(mins) {
-  const h = Math.floor(mins / 60), m = mins % 60;
+function fmtMins(mins) {
+  const h = Math.floor(mins / 60), m = Math.round(mins % 60);
   if (h && m) return `${h}h ${m}m`;
   if (h) return `${h}h`;
   return `${m}m`;
 }
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
 
-function renderTimer(info, on) {
-  const status = $("timerStatus");
-  const off = Number(info.countDownToOff) || 0;
-  const toOn = Number(info.countDownToOn) || 0;
-  if (off > 0) {
-    status.hidden = false;
-    status.innerHTML =
-      `auto-off in ${fmtDur(off)} <button class="link-btn" id="timerCancel">cancel</button>`;
-  } else if (toOn > 0) {
-    status.hidden = false;
-    status.innerHTML =
-      `auto-on in ${fmtDur(toOn)} <button class="link-btn" id="timerCancel">cancel</button>`;
+/* ================= tape gauge ================= */
+
+function buildTape() {
+  const strip = $("tapeStrip");
+  strip.style.width = `${(TAPE_MAX - TAPE_MIN) * PX_PER_DEG + 1}px`;
+  let html = "";
+  for (let t = TAPE_MIN; t <= TAPE_MAX; t += 0.5) {
+    const x = (t - TAPE_MIN) * PX_PER_DEG;
+    const whole = t % 1 === 0;
+    const even = t % 2 === 0;
+    html += `<span class="tick ${whole ? "whole" : "half"}${even ? " even" : ""}" style="left:${x}px"></span>`;
+    if (even) html += `<span class="tick-lab" style="left:${x}px">${t}</span>`;
+  }
+  strip.innerHTML = html;
+}
+
+function renderTape(setTemp) {
+  const well = $("tape");
+  const center = well.clientWidth / 2;
+  $("tapeStrip").style.transform = `translateX(${center - (setTemp - TAPE_MIN) * PX_PER_DEG}px)`;
+  const room = roomReading();
+  const marker = $("roomMarker");
+  if (room) {
+    marker.hidden = false;
+    // marker rides the strip: position within strip coords, offset by strip transform
+    const stripX = center - (setTemp - TAPE_MIN) * PX_PER_DEG;
+    marker.style.left = `${stripX + (room.temperature - TAPE_MIN) * PX_PER_DEG - 1.5}px`;
   } else {
-    status.hidden = true;
-    status.innerHTML = "";
+    marker.hidden = true;
   }
-  const cancel = document.getElementById("timerCancel");
-  if (cancel) {
-    cancel.addEventListener("click", () =>
-      sendChange({ info: { countDownToOff: 0, countDownToOn: 0 } }, status));
-  }
-  document.querySelectorAll("#timerChips .seg-btn").forEach((b) => {
-    b.classList.toggle("active", off > 0 && Number(b.dataset.min) === off);
+}
+
+function initTapeDrag() {
+  const well = $("tape");
+  let dragging = false, x0 = 0, t0 = 0, moved = false;
+  well.addEventListener("pointerdown", (e) => {
+    if (!state.local) return;
+    dragging = true; moved = false;
+    x0 = e.clientX; t0 = state.local.info.setTemp;
+    well.classList.add("dragging");
+    well.setPointerCapture(e.pointerId);
+    state.interacting = true;
   });
+  well.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const raw = t0 - (e.clientX - x0) / PX_PER_DEG;
+    const snapped = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(raw)));
+    if (snapped !== state.local.info.setTemp) {
+      moved = true;
+      state.local.info.setTemp = snapped;
+      renderHero();
+    }
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    well.classList.remove("dragging");
+    state.interacting = false;
+    if (moved) queueSetTemp();
+  };
+  well.addEventListener("pointerup", end);
+  well.addEventListener("pointercancel", end);
 }
 
-function zoneIds(ac) {
-  return Object.keys(ac.zones).sort();
+/* ================= rendering ================= */
+
+function renderHero() {
+  const info = state.local.info;
+  const on = info.state === "on";
+  const room = roomReading();
+
+  $("setTemp").textContent = Math.round(info.setTemp);
+  renderTape(info.setTemp);
+
+  const st = statusText(info, room);
+  $("roomLine").innerHTML = room
+    ? `room <b>${Number(room.temperature).toFixed(1)}&deg;</b> &middot; ${st}`
+    : st === "off" ? "system off" : st;
+
+  const chip = $("deltaChip");
+  let delta, color = "var(--dim)";
+  if (!on) delta = "system off";
+  else if (!room) delta = st;
+  else {
+    const dd = info.setTemp - room.temperature;
+    if (Math.abs(dd) <= 0.2) delta = "at temperature";
+    else if (dd > 0) delta = `+${dd.toFixed(1)}&deg; to go`;
+    else delta = `${dd.toFixed(1)}&deg; over`;
+  }
+  if (on && st !== "standby") {
+    color = info.mode === "heat" ? "var(--acc)" : info.mode === "vent" ? "var(--ok)" : "var(--cool)";
+  }
+  chip.innerHTML = delta;
+  chip.style.color = color;
+
+  const pwr = $("powerBtn");
+  pwr.classList.toggle("off", !on);
+  pwr.title = on ? "Turn off" : "Turn on";
+
+  document.querySelectorAll(".mode-pill").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === info.mode);
+  });
+  document.querySelectorAll("#fanChips .chip-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.fan === info.fan);
+  });
+  renderTimerChips(info);
 }
 
-function renderZones(ac, on) {
+function renderTimerChips(info) {
+  const off = Number(info.countDownToOff) || 0;
+  const chips = [...document.querySelectorAll("#timerChips .chip-btn")];
+  chips.forEach((b) => { b.classList.remove("active"); b.textContent = b.dataset.label; });
+  if (off > 0) {
+    // the nearest preset at/above the remaining time shows the live countdown
+    const target = chips.find((b) => Number(b.dataset.min) >= off) || chips[chips.length - 1];
+    target.classList.add("active");
+    target.textContent = fmtMins(off);
+  }
+}
+
+function renderZones() {
+  const ac = state.local;
+  const on = ac.info.state === "on";
   const list = $("zoneList");
-  const ids = zoneIds(ac);
+  const ids = Object.keys(ac.zones).sort();
   const openCount = ids.filter((z) => ac.zones[z].state === "open").length;
 
   for (const zid of ids) {
@@ -150,27 +215,27 @@ function renderZones(ac, on) {
       card.id = `zone-${zid}`;
       card.className = "zone";
       card.innerHTML = `
-        <div>
-          <div class="zone-name"></div>
-          <div class="zone-sub"></div>
+        <div class="zone-head">
+          <div>
+            <div class="zone-name"></div>
+            <div class="zone-sub"></div>
+          </div>
+          <button class="ztog" role="switch" aria-label="zone open"></button>
         </div>
-        <div class="zone-temp"></div>
-        <button class="switch" role="switch" aria-label="zone open"></button>
         <div class="zone-slider-row">
           <input type="range" min="5" max="100" step="5" aria-label="damper percentage">
-          <span class="zone-sub pct-out"></span>
+          <span class="pct"></span>
         </div>`;
       list.appendChild(card);
 
-      card.querySelector(".switch").addEventListener("click", () => {
+      card.querySelector(".ztog").addEventListener("click", () => {
         const zone = state.local.zones[zid];
-        const target = zone.state === "open" ? "close" : "open";
-        sendChange({ zones: { [zid]: { state: target } } }, card);
+        sendChange({ zones: { [zid]: { state: zone.state === "open" ? "close" : "open" } } }, card);
       });
       const slider = card.querySelector("input");
       slider.addEventListener("input", () => {
         state.interacting = true;
-        card.querySelector(".pct-out").innerHTML = `<span class="pct">${slider.value}%</span>`;
+        card.querySelector(".pct").textContent = `${slider.value}%`;
         slider.style.setProperty("--fill", `${slider.value}%`);
       });
       slider.addEventListener("change", () => {
@@ -180,66 +245,55 @@ function renderZones(ac, on) {
     }
 
     const isOpen = z.state === "open";
-    card.classList.toggle("open", isOpen && on);
     card.querySelector(".zone-name").textContent = z.name;
 
-    const tempEl = card.querySelector(".zone-temp");
     const s = z.sensor;
+    let sub = isOpen ? `damper open &middot; ${Number(z.value)}%` : "closed";
     if (s && s.temperature != null) {
-      tempEl.classList.toggle("stale", !!s.stale);
-      tempEl.innerHTML =
-        `<span class="t">${Number(s.temperature).toFixed(1)}&deg;</span>` +
-        `<span class="rh">${s.stale
-          ? `stale ${fmtDur(Math.max(1, Math.round(s.ageSeconds / 60)))}`
-          : `${Math.round(Number(s.humidity))}% rh${Number(s.battery) <= 20 ? " · batt!" : ""}`}</span>`;
-    } else {
-      tempEl.innerHTML = `<span class="rh">no sensor</span>`;
+      sub = s.stale
+        ? `<span class="stale-tag">sensor stale</span> &middot; ${sub}`
+        : `<b>${Number(s.temperature).toFixed(1)}&deg;</b> &middot; ${Math.round(Number(s.humidity))}% rh &middot; ${sub}`;
+      if (s.battery != null && s.battery <= 20) sub += ' &middot; <span class="stale-tag">low batt</span>';
     }
-    card.querySelector(".zone-sub").innerHTML = isOpen
-      ? `damper <span class="pct">${Number(z.value)}%</span>`
-      : "closed";
-    const sw = card.querySelector(".switch");
-    sw.classList.toggle("on", isOpen);
-    sw.setAttribute("aria-checked", String(isOpen));
-    // guard: while the system is on, the last open zone cannot close
-    sw.disabled = on && isOpen && openCount === 1;
-    sw.title = sw.disabled ? "At least one zone must stay open while the system is on" : "";
+    card.querySelector(".zone-sub").innerHTML = sub;
 
-    const sliderRow = card.querySelector(".zone-slider-row");
-    sliderRow.classList.toggle("hidden", !isOpen);
+    const tog = card.querySelector(".ztog");
+    tog.classList.toggle("on", isOpen);
+    tog.setAttribute("aria-checked", String(isOpen));
+    tog.disabled = on && isOpen && openCount === 1;
+    tog.title = tog.disabled ? "At least one zone must stay open while the system is on" : "";
+
+    card.querySelector(".zone-slider-row").classList.toggle("hidden", !isOpen);
     if (!state.interacting) {
       const slider = card.querySelector("input");
       slider.value = Number(z.value);
       slider.style.setProperty("--fill", `${Number(z.value)}%`);
-      card.querySelector(".pct-out").innerHTML = `<span class="pct">${Number(z.value)}%</span>`;
+      card.querySelector(".pct").textContent = `${Number(z.value)}%`;
     }
   }
 }
 
 function renderScenes() {
-  const list = $("sceneList");
+  const list = $("schedList");
   if (!state.scenes) { list.innerHTML = ""; return; }
   const order = state.scenes.scenesOrder || Object.keys(state.scenes.scenes || {});
   list.innerHTML = order.map((sid) => {
     const s = state.scenes.scenes[sid];
     if (!s) return "";
-    const time = `${fmtTime(s.startTime)}–${s.airconStopTimeEnabled ? fmtTime(s.airconStopTime) : "…"}`;
-    const days = fmtDays(s.activeDays);
-    return `<div class="scene">
+    const time = `${fmtClock(s.startTime)}–${s.airconStopTimeEnabled ? fmtClock(s.airconStopTime) : "…"}`;
+    return `<div class="sched-row">
       <div>
-        <div class="scene-name">${esc(s.name)}</div>
-        <div class="scene-sub">${days} · ${time}</div>
+        <div class="sched-name">${esc(s.name)}</div>
+        <div class="sched-sub">${fmtDays(s.activeDays)} &middot; ${time}</div>
       </div>
-      <span class="chip ${s.timerEnabled ? "en" : "dis"}">${s.timerEnabled ? "enabled" : "off"}</span>
+      <span class="tag ${s.timerEnabled ? "en" : "off"}">${s.timerEnabled ? "Enabled" : "Off"}</span>
     </div>`;
   }).join("");
 }
-
-function fmtTime(mins) {
+function fmtClock(mins) {
   const h = Math.floor(mins / 60), m = mins % 60;
   const ampm = h >= 12 ? "pm" : "am";
-  const hh = ((h + 11) % 12) + 1;
-  return `${hh}:${String(m).padStart(2, "0")}${ampm}`;
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")}${ampm}`;
 }
 function fmtDays(mask) {
   const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -249,38 +303,75 @@ function fmtDays(mask) {
   if (on.join() === "Sun,Sat") return "weekends";
   return on.join(" ");
 }
-function esc(s) {
-  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function renderHeader() {
+  const info = state.local?.info;
+  const badges = [];
+  if (state.remote?.mock) badges.push('<span class="chip-sm warn">mock</span>');
+  if (state.remote?.pending) badges.push('<span class="chip-sm warn">queued</span>');
+  if (state.remote?.mqtt === false) badges.push('<span class="chip-sm warn">sensors offline</span>');
+  if (info?.filterCleanStatus) badges.push('<span class="chip-sm warn">filter due</span>');
+  if (info?.airconErrorCode) badges.push(`<span class="chip-sm bad">err ${esc(info.airconErrorCode)}</span>`);
+  $("badges").innerHTML = badges.join("");
+
+  const sys = state.system;
+  const chipEl = $("outdoorChip");
+  const t = Number(sys?.suburbTemp);
+  if (sys && isFinite(t) && t > -20 && t < 55 && t !== 0) {
+    chipEl.hidden = false;
+    chipEl.textContent = `${t.toFixed(1).replace(/\.0$/, "")}° outside`;
+  } else {
+    chipEl.hidden = true;
+  }
 }
 
-function renderBadges(info) {
-  const badges = [];
-  if (state.remote?.mock) badges.push('<span class="badge warn">mock</span>');
-  if (state.remote?.pending) badges.push('<span class="badge warn">queued</span>');
-  if (state.remote?.mqtt === false) badges.push('<span class="badge warn">sensors offline</span>');
-  if (info.filterCleanStatus) badges.push('<span class="badge warn">filter due</span>');
-  if (info.airconErrorCode) badges.push(`<span class="badge bad">err ${esc(info.airconErrorCode)}</span>`);
-  $("topBadges").innerHTML = badges.join("");
+function renderToday() {
+  const card = $("todayCard");
+  const t = state.today;
+  if (!t) { card.hidden = true; return; }
+  card.hidden = false;
+  $("todayRuntime").textContent = fmtMins(Math.round(t.runtimeSeconds / 60));
+  const filter = state.local?.info?.filterCleanStatus ? "filter due" : "filter ok";
+  $("todaySub").textContent = `${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"} · ${filter}`;
+
+  const svg = $("spark");
+  const pts = (t.series || []).filter((p) => p[1] != null);
+  if (pts.length < 2) { svg.innerHTML = ""; return; }
+  const temps = pts.map((p) => p[1]);
+  const tmin = Math.min(...temps), tmax = Math.max(...temps);
+  const span = Math.max(tmax - tmin, 0.5);
+  const X = (i) => 2 + (i / (pts.length - 1)) * 112;
+  const Y = (v) => 33 - ((v - tmin) / span) * 28;
+  const poly = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  svg.innerHTML = `<polyline points="${poly}"/><circle cx="${X(pts.length - 1).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3"/>`;
 }
 
 function renderFoot() {
   const sys = state.system;
   if (!sys) return;
-  const age = state.remote?.ageSeconds;
+  const age = state.remote ? Math.round(state.remote.ageSeconds + (Date.now() - lastFetch) / 1000) : null;
   $("footInfo").innerHTML =
     `${esc(sys.name)} · ${esc(sys.tspIp || "")} · fw ${esc(String(sys.myAppRev || ""))}` +
-    `<br>updated ${age != null ? Math.round(age) + "s ago" : "—"}` +
-    (state.remote?.mock ? " · simulated tablet (mock mode)" : "") +
-    (state.remote?.pending
-      ? `<br>change queued ${Math.round(state.remote.pendingAgeSeconds)}s ago — delivering when the tablet wakes`
-      : "");
+    `<br>updated ${age != null ? age + "s ago" : "—"}` +
+    (state.remote?.mock ? " · simulated tablet" : "") +
+    (state.remote?.pending ? " · change queued, delivering when the tablet wakes" : "");
 }
 
-function setStatusDot(cls) {
-  $("statusDot").className = `brand-mark ${cls}`;
+function render() {
+  if (!state.local) return;
+  renderHero();
+  renderZones();
+  renderHeader();
+  renderToday();
+  renderFoot();
 }
 
-/* ---------------- networking ---------------- */
+/* ================= networking ================= */
+
+let lastFetch = Date.now();
+
+function setDot(cls) { $("statusDot").className = `dot ${cls}`; }
 
 async function fetchState(refresh = false) {
   try {
@@ -288,20 +379,27 @@ async function fetchState(refresh = false) {
     if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
     const payload = await res.json();
     state.remote = payload;
+    lastFetch = Date.now();
     state.local = structuredClone(payload.data.aircons.ac1);
     state.scenes = payload.data.myScenes;
     state.system = payload.data.system;
-    setStatusDot(payload.ok ? (payload.ageSeconds > 90 ? "stale" : "live") : "down");
+    setDot(payload.ok ? (payload.ageSeconds > 90 ? "stale" : "") : "down");
     render();
     renderScenes();
   } catch (err) {
-    setStatusDot("down");
+    setDot("down");
     toast(`Can't reach the system: ${err.message}`, true);
   }
 }
 
+async function fetchToday() {
+  try {
+    const res = await fetch("/api/today");
+    if (res.ok) { state.today = await res.json(); renderToday(); }
+  } catch { /* non-critical */ }
+}
+
 async function sendChange(change, pendingEl = null) {
-  // optimistic local apply
   if (change.info) Object.assign(state.local.info, change.info);
   if (change.zones) {
     for (const [zid, patch] of Object.entries(change.zones)) {
@@ -319,17 +417,18 @@ async function sendChange(change, pendingEl = null) {
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || res.statusText);
     state.remote = payload;
+    lastFetch = Date.now();
     if (payload.data) state.local = structuredClone(payload.data.aircons.ac1);
     if (payload.queued) {
-      setStatusDot("down");
+      setDot("down");
       toast("Tablet is asleep — change queued, it will apply the moment it wakes.");
     } else {
-      setStatusDot("live");
+      setDot("");
     }
     render();
   } catch (err) {
     toast(err.message, true);
-    await fetchState(true); // revert to the tablet's truth
+    await fetchState(true);
   } finally {
     pendingEl?.classList.remove("pending");
   }
@@ -344,45 +443,76 @@ function toast(msg, isError = false) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
 }
 
-/* ---------------- wiring ---------------- */
-
-function nudgeTemp(delta) {
-  const info = state.local.info;
-  info.setTemp = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(info.setTemp) + delta));
-  render();
+function queueSetTemp() {
   clearTimeout(state.tempTimer);
   state.tempTimer = setTimeout(() => {
-    sendChange({ info: { setTemp: state.local.info.setTemp } }, $("dial").parentElement);
-  }, 650);
+    sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("tape"));
+  }, 600);
 }
 
-function init() {
-  buildDial();
-  $("tempUp").addEventListener("click", () => nudgeTemp(1));
-  $("tempDown").addEventListener("click", () => nudgeTemp(-1));
-  $("powerBtn").addEventListener("click", () => {
-    const target = state.local.info.state === "on" ? "off" : "on";
-    sendChange({ info: { state: target } }, $("powerBtn"));
+/* ================= wiring ================= */
+
+function buildControls() {
+  $("modeGrid").innerHTML = MODES.map((m) => `
+    <button class="mode-pill" data-mode="${m.id}">
+      <svg viewBox="0 0 24 24" ${m.fill
+        ? 'fill="currentColor" stroke="none"'
+        : 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"'}>
+        <path d="${m.d}"/>
+      </svg>${m.label}
+    </button>`).join("");
+  $("fanChips").innerHTML = FANS.map(([id, label]) =>
+    `<button class="chip-btn" data-fan="${id}">${label}</button>`).join("");
+  $("timerChips").innerHTML = TIMERS.map(([mins, label]) =>
+    `<button class="chip-btn" data-min="${mins}" data-label="${label}">${label}</button>`).join("");
+
+  document.querySelectorAll(".mode-pill").forEach((b) => {
+    b.addEventListener("click", () => sendChange({ info: { mode: b.dataset.mode } }, $("modeGrid")));
   });
-  document.querySelectorAll("#modeSeg .seg-btn").forEach((b) => {
-    b.addEventListener("click", () => sendChange({ info: { mode: b.dataset.mode } }, b.parentElement));
-  });
-  document.querySelectorAll("#fanSeg .seg-btn").forEach((b) => {
+  document.querySelectorAll("#fanChips .chip-btn").forEach((b) => {
     b.addEventListener("click", () => sendChange({ info: { fan: b.dataset.fan } }, b.parentElement));
   });
-  document.querySelectorAll("#timerChips .seg-btn").forEach((b) => {
+  document.querySelectorAll("#timerChips .chip-btn").forEach((b) => {
     b.addEventListener("click", () => {
-      const mins = Number(b.dataset.min);
-      const info = { countDownToOff: mins };
-      if (state.local.info.state !== "on") info.state = "on"; // "run for X" from standby
-      sendChange({ info }, b.parentElement);
+      const active = b.classList.contains("active");
+      if (active) {
+        sendChange({ info: { countDownToOff: 0 } }, b.parentElement);
+      } else {
+        const info = { countDownToOff: Number(b.dataset.min) };
+        if (state.local.info.state !== "on") info.state = "on";
+        sendChange({ info }, b.parentElement);
+      }
     });
   });
 
+  $("tempDown").addEventListener("click", () => nudge(-1));
+  $("tempUp").addEventListener("click", () => nudge(1));
+  $("powerBtn").addEventListener("click", () => {
+    sendChange({ info: { state: state.local.info.state === "on" ? "off" : "on" } }, $("powerBtn"));
+  });
+}
+
+function nudge(delta) {
+  if (!state.local) return;
+  const info = state.local.info;
+  info.setTemp = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(info.setTemp) + delta));
+  renderHero();
+  queueSetTemp();
+}
+
+function init() {
+  initTheme();
+  buildTape();
+  buildControls();
+  initTapeDrag();
   fetchState();
+  fetchToday();
   setInterval(() => {
     if (!document.hidden && !state.interacting) fetchState();
   }, POLL_MS);
+  setInterval(fetchToday, 5 * 60 * 1000);
+  setInterval(renderFoot, 5000);
+  window.addEventListener("resize", () => state.local && renderTape(state.local.info.setTemp));
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) fetchState(true);
   });

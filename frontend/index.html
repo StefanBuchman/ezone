@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>e-zone</title>
-<meta name="theme-color" content="#0B1014">
+<meta name="theme-color" content="#0A0D16">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="e-zone">
@@ -15,102 +15,83 @@
 </head>
 <body>
 
-<div class="glow" id="glow" aria-hidden="true"></div>
+<div class="page">
 
-<header class="top">
-  <div class="brand">
-    <span class="brand-mark" id="statusDot" title="connection"></span>
-    <span class="brand-name">e&#8209;zone</span>
-  </div>
-  <div class="top-badges" id="topBadges"></div>
-</header>
+  <!-- 1 · header -->
+  <header class="hdr">
+    <div class="brand"><span class="dot" id="statusDot"></span><span class="wordmark">e-zone</span></div>
+    <div class="hdr-right">
+      <span id="badges"></span>
+      <span class="chip-sm" id="outdoorChip" hidden></span>
+      <button class="theme-btn" id="themeBtn" aria-label="Toggle theme">&#9681;</button>
+    </div>
+  </header>
 
-<main class="layout">
-
-  <!-- ============ dial + primary controls ============ -->
-  <section class="panel hero" aria-label="Temperature control">
-    <div class="dial-wrap">
-      <svg id="dial" viewBox="0 0 300 240" role="img" aria-label="Set temperature dial">
-        <g id="dialTicks"></g>
-        <path id="dialTrack" fill="none" stroke-linecap="round"></path>
-        <path id="dialArc" fill="none" stroke-linecap="round"></path>
-        <circle id="dialTip" r="7"></circle>
-      </svg>
-      <div class="dial-center">
-        <span class="dial-label" id="dialLabel">set to</span>
-        <span class="dial-temp"><span id="setTemp">--</span><span class="dial-unit">&deg;</span></span>
-        <span class="dial-mode" id="dialMode">&nbsp;</span>
+  <!-- 2 · hero -->
+  <section class="hero">
+    <div class="hero-top">
+      <div>
+        <div class="lbl">Set to</div>
+        <div class="setpoint"><span id="setTemp">--</span>&deg;</div>
+        <div class="room-line" id="roomLine">&nbsp;</div>
       </div>
+      <span class="delta-chip" id="deltaChip">system off</span>
     </div>
 
-    <div class="primary-controls">
-      <button class="round-btn" id="tempDown" aria-label="Lower set temperature">
-        <svg viewBox="0 0 24 24"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-      </button>
-      <button class="power-btn" id="powerBtn" aria-label="Power">
-        <svg viewBox="0 0 24 24">
-          <path d="M12 3v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-          <path d="M6.6 6.6a8 8 0 1 0 10.8 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+    <div class="tape" id="tape">
+      <div class="tape-strip" id="tapeStrip"></div>
+      <div class="lubber"></div>
+      <div class="room-marker" id="roomMarker" hidden></div>
+      <span class="drag-hint">&#8592; drag &#8594;</span>
+    </div>
+
+    <div class="stepper-row">
+      <button class="step-btn" id="tempDown" aria-label="Lower set temperature">&#8722;</button>
+      <button class="step-btn" id="tempUp" aria-label="Raise set temperature">+</button>
+      <button class="pwr-btn" id="powerBtn" aria-label="Power">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M12 3v9"/><path d="M17.7 6.6a8 8 0 1 1-11.4 0"/>
         </svg>
-        <span id="powerLabel">off</span>
-      </button>
-      <button class="round-btn" id="tempUp" aria-label="Raise set temperature">
-        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
       </button>
     </div>
 
-    <div class="seg" id="modeSeg" role="radiogroup" aria-label="Mode">
-      <button class="seg-btn" data-mode="heat" role="radio">
-        <svg viewBox="0 0 24 24"><path d="M12 3c1 3.5-3.5 5-3.5 9a5.5 5.5 0 0 0 11 0c0-2.5-1.5-4-2.5-5-.3 1.6-1 2.4-2 3 .3-2.8-.8-5.6-3-7z" fill="currentColor"/></svg>
-        heat
-      </button>
-      <button class="seg-btn" data-mode="cool" role="radio">
-        <svg viewBox="0 0 24 24"><path d="M12 2v20M4 6l16 12M4 18L20 6M12 2l-2.5 3M12 2l2.5 3M12 22l-2.5-3m2.5 3l2.5-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        cool
-      </button>
-      <button class="seg-btn" data-mode="vent" role="radio">
-        <svg viewBox="0 0 24 24"><path d="M4 7h9a3 3 0 1 0-3-3M4 12h14a3 3 0 1 1-3 3M4 17h7a2.5 2.5 0 1 1-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
-        vent
-      </button>
-      <button class="seg-btn" data-mode="dry" role="radio">
-        <svg viewBox="0 0 24 24"><path d="M12 3.5S6 10 6 14.5a6 6 0 0 0 12 0C18 10 12 3.5 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-        dry
-      </button>
-    </div>
-
-    <div class="fan-row">
-      <span class="row-label">fan</span>
-      <div class="seg seg-small" id="fanSeg" role="radiogroup" aria-label="Fan speed">
-        <button class="seg-btn" data-fan="low"><span class="bars b1"><i></i></span>low</button>
-        <button class="seg-btn" data-fan="medium"><span class="bars b2"><i></i></span>med</button>
-        <button class="seg-btn" data-fan="high"><span class="bars b3"><i></i></span>high</button>
-      </div>
-    </div>
-
-    <div class="fan-row">
-      <span class="row-label">timer</span>
-      <div class="seg seg-small" id="timerChips" aria-label="Run timer">
-        <button class="seg-btn" data-min="30">30m</button>
-        <button class="seg-btn" data-min="60">1h</button>
-        <button class="seg-btn" data-min="90">1.5h</button>
-        <button class="seg-btn" data-min="120">2h</button>
-      </div>
-    </div>
-    <div class="timer-status" id="timerStatus" hidden></div>
+    <div class="mode-grid" id="modeGrid"></div>
   </section>
 
-  <!-- ============ zones ============ -->
-  <section class="col">
-    <h2 class="sec-label">zones</h2>
-    <div id="zoneList"></div>
-
-    <h2 class="sec-label">schedules <span class="sec-note">read-only &middot; edit on wall panel</span></h2>
-    <div id="sceneList"></div>
-
-    <footer class="foot" id="footInfo"></footer>
+  <!-- 3 · fan / timer -->
+  <section class="card rows-card">
+    <div class="ft-row">
+      <span class="row-lbl">Fan</span>
+      <div class="chips" id="fanChips"></div>
+    </div>
+    <div class="ft-row">
+      <span class="row-lbl">Timer</span>
+      <div class="chips" id="timerChips"></div>
+    </div>
   </section>
 
-</main>
+  <!-- 4 · today -->
+  <section class="card today-card" id="todayCard" hidden>
+    <div>
+      <div class="lbl">Heating today</div>
+      <div class="today-big" id="todayRuntime">0m</div>
+      <div class="lbl" id="todaySub"></div>
+    </div>
+    <svg id="spark" width="118" height="38" viewBox="0 0 118 38" aria-label="Room temperature trend"></svg>
+  </section>
+
+  <!-- 5 · zones -->
+  <div class="sec-lbl">Zones</div>
+  <div id="zoneList"></div>
+
+  <!-- 6 · schedules -->
+  <div class="sec-lbl">Schedules <span class="sec-note">read-only &middot; edit on wall panel</span></div>
+  <div class="sched-group" id="schedList"></div>
+
+  <!-- 7 · footer -->
+  <footer class="foot" id="footInfo"></footer>
+
+</div>
 
 <div class="toast" id="toast" role="status"></div>
 
