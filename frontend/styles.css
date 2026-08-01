@@ -161,6 +161,14 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 }
 .pwr-btn.on { background: var(--acc); color: #fff; }
 .pwr-btn:active { transform: scale(0.92); }
+.auto-pill {
+  height: 46px; padding: 0 18px; border-radius: 999px;
+  background: var(--chip); color: var(--dim);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.04em;
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+}
+.auto-pill.on { background: var(--ok); color: #fff; }
+.auto-pill:active { transform: scale(0.95); }
 
 /* whole hero goes quiet when the system is off */
 #dialArc, #handleO, #handleI { transition: opacity 0.3s; }
@@ -243,16 +251,11 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 }
 .ztog.on::after { left: 22px; }
 .ztog:disabled { opacity: 0.45; cursor: not-allowed; }
-.zone-auto-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.zone-auto-row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
 .zone-auto-row[hidden] { display: none; }
-.auto-controls { display: inline-flex; align-items: center; gap: 6px; }
-.auto-controls[hidden] { display: none; }
-.auto-step { padding: 7px 12px; }
-.auto-target {
-  font-size: 13px; font-weight: 600; min-width: 46px; text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.auto-status { margin-left: auto; font-size: 11px; color: var(--dim); }
+.auto-tag { cursor: default; }
+.auto-tag.active { background: var(--ok); color: #fff; }
+.auto-status { font-size: 11px; color: var(--dim); }
 .auto-status.warn { color: var(--warn); }
 .chip-sm.ok { color: var(--ok); }
 

@@ -60,16 +60,28 @@ function roomReading() {
   return null;
 }
 
-function statusText(info, room) {
+function statusText(info, room, target) {
   if (info.state !== "on") return "off";
   if (info.mode === "vent") return "venting";
   if (info.mode === "dry") return "drying";
   if (room) {
-    if (info.mode === "heat" && room.temperature < info.setTemp - 0.2) return "heating";
-    if (info.mode === "cool" && room.temperature > info.setTemp + 0.2) return "cooling";
+    if (info.mode === "heat" && room.temperature < target - 0.2) return "heating";
+    if (info.mode === "cool" && room.temperature > target + 0.2) return "cooling";
     return "standby";
   }
   return info.mode === "heat" ? "heating" : "cooling";
+}
+
+function fmtTemp(t) {
+  return Number.isInteger(Number(t)) ? String(Math.round(t)) : Number(t).toFixed(1);
+}
+
+function autoState() {
+  return state.remote?.auto || { enabled: false, target: 21 };
+}
+function dialValue() {
+  const a = autoState();
+  return a.enabled ? a.target : state.local.info.setTemp;
 }
 
 function fmtMins(mins) {
@@ -177,7 +189,15 @@ function initDialDrag() {
     let a = ((Math.atan2(dy, dx) * 180) / Math.PI - DIAL.start + 360) % 360;
     if (a > DIAL.sweep) a = a > DIAL.sweep + (360 - DIAL.sweep) / 2 ? 0 : DIAL.sweep;
     const raw = TEMP_MIN + (a / DIAL.sweep) * (TEMP_MAX - TEMP_MIN);
-    return Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(raw)));
+    // auto targets are software-side: half-degree resolution
+    const snap = autoState().enabled ? 2 : 1;
+    return Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(raw * snap) / snap));
+  };
+
+  const applyDialValue = (t) => {
+    if (autoState().enabled) state.remote.auto.target = t;
+    else state.local.info.setTemp = t;
+    renderHero();
   };
 
   wrap.addEventListener("pointerdown", (e) => {
@@ -190,27 +210,19 @@ function initDialDrag() {
     wrap.setPointerCapture(e.pointerId);
     state.interacting = true;
     const t = pointToTemp(e);
-    if (t !== state.local.info.setTemp) {
-      moved = true;
-      state.local.info.setTemp = t;
-      renderHero();
-    }
+    if (t !== dialValue()) { moved = true; applyDialValue(t); }
   });
   wrap.addEventListener("pointermove", (e) => {
     if (!dragging) return;
     const t = pointToTemp(e);
-    if (t !== state.local.info.setTemp) {
-      moved = true;
-      state.local.info.setTemp = t;
-      renderHero();
-    }
+    if (t !== dialValue()) { moved = true; applyDialValue(t); }
   });
   const end = () => {
     if (!dragging) return;
     dragging = false;
     wrap.classList.remove("dragging");
     state.interacting = false;
-    if (moved) queueSetTemp();
+    if (moved) commitDial();
   };
   wrap.addEventListener("pointerup", end);
   wrap.addEventListener("pointercancel", end);
@@ -221,22 +233,29 @@ function initDialDrag() {
 function renderHero() {
   const info = state.local.info;
   const on = info.state === "on";
+  const auto = autoState();
+  const value = dialValue();
   const room = roomReading();
 
-  $("setTemp").textContent = Math.round(info.setTemp);
-  renderDial(info.setTemp, info.mode);
+  $("setTemp").textContent = fmtTemp(value);
+  document.querySelector(".dial-center .lbl").textContent = auto.enabled ? "Target" : "Set to";
+  renderDial(value, info.mode);
 
-  const st = statusText(info, room);
+  const autoBtn = $("autoBtn");
+  autoBtn.classList.toggle("on", auto.enabled);
+  autoBtn.setAttribute("aria-pressed", String(auto.enabled));
+
+  const st = statusText(info, room, value);
   $("roomLine").innerHTML = room
     ? `room <b>${Number(room.temperature).toFixed(1)}&deg;</b> &middot; ${st}`
     : st === "off" ? "system off" : st;
 
   const chip = $("deltaChip");
   let delta, color = "var(--dim)";
-  if (!on) delta = "system off";
+  if (!on) delta = auto.enabled ? "auto &middot; waiting" : "system off";
   else if (!room) delta = st;
   else {
-    const dd = info.setTemp - room.temperature;
+    const dd = value - room.temperature;
     if (Math.abs(dd) <= 0.2) delta = "at temperature";
     else if (dd > 0) delta = `+${dd.toFixed(1)}&deg; to go`;
     else delta = `${dd.toFixed(1)}&deg; over`;
@@ -296,12 +315,7 @@ function renderZones() {
           <button class="ztog" role="switch" aria-label="zone open"></button>
         </div>
         <div class="zone-auto-row" hidden>
-          <button class="chip-btn auto-chip">auto</button>
-          <span class="auto-controls" hidden>
-            <button class="chip-btn auto-step" data-d="-0.5">&#8722;</button>
-            <span class="auto-target">21.0&deg;</span>
-            <button class="chip-btn auto-step" data-d="0.5">+</button>
-          </span>
+          <span class="chip-btn auto-tag">auto</span>
           <span class="auto-status"></span>
         </div>
         <div class="zone-slider-row">
@@ -325,20 +339,6 @@ function renderZones() {
         sendChange({ zones: { [zid]: { value: Number(slider.value) } } }, card);
       });
 
-      card.querySelector(".auto-chip").addEventListener("click", () => {
-        const auto = state.local.zones[zid].auto || {};
-        sendAuto(zid, { enabled: !auto.enabled });
-      });
-      card.querySelectorAll(".auto-step").forEach((b) => {
-        b.addEventListener("click", () => {
-          const auto = state.local.zones[zid].auto || { target: 21 };
-          const target = Math.max(TEMP_MIN, Math.min(TEMP_MAX, (auto.target || 21) + Number(b.dataset.d)));
-          auto.target = target;
-          card.querySelector(".auto-target").innerHTML = `${target.toFixed(1)}&deg;`;
-          clearTimeout(state.autoTimer);
-          state.autoTimer = setTimeout(() => sendAuto(zid, { target }), 500);
-        });
-      });
     }
 
     const isOpen = z.state === "open";
@@ -360,28 +360,22 @@ function renderZones() {
     tog.disabled = on && isOpen && openCount === 1;
     tog.title = tog.disabled ? "At least one zone must stay open while the system is on" : "";
 
-    // auto row: only offered on sensor-equipped zones
+    // auto status row: sensor-equipped zones while master auto is engaged
     const autoRow = card.querySelector(".zone-auto-row");
-    const auto = z.auto;
-    const hasSensor = !!(s && s.temperature != null);
-    autoRow.hidden = !hasSensor && !auto;
+    const globalAuto = autoState().enabled;
+    const zoneAuto = z.auto; // {calling, suspended} for sensor zones
+    autoRow.hidden = !(globalAuto && zoneAuto);
     if (!autoRow.hidden) {
-      const enabled = !!auto?.enabled;
-      const chip = card.querySelector(".auto-chip");
-      chip.classList.toggle("active", enabled);
-      card.querySelector(".auto-controls").hidden = !enabled;
-      if (enabled) {
-        card.querySelector(".auto-target").innerHTML = `${Number(auto.target).toFixed(1)}&deg;`;
-      }
+      card.querySelector(".auto-tag").classList.add("active");
       const statusEl = card.querySelector(".auto-status");
-      statusEl.textContent = !enabled ? ""
-        : auto.suspended ? `suspended: ${auto.suspended}`
-        : auto.calling ? "calling" : "holding";
-      statusEl.classList.toggle("warn", !!auto?.suspended);
+      statusEl.textContent = zoneAuto.suspended
+        ? `suspended: ${zoneAuto.suspended}`
+        : zoneAuto.calling ? "calling for " + (state.local.info.mode === "cool" ? "cooling" : "heat") : "holding";
+      statusEl.classList.toggle("warn", !!zoneAuto.suspended);
     }
 
     const sliderRow = card.querySelector(".zone-slider-row");
-    sliderRow.classList.toggle("hidden", !isOpen || !!auto?.enabled);
+    sliderRow.classList.toggle("hidden", !isOpen || (globalAuto && !!zoneAuto));
     if (!state.interacting) {
       const slider = card.querySelector("input");
       slider.value = Number(z.value);
@@ -391,20 +385,20 @@ function renderZones() {
   }
 }
 
-async function sendAuto(zid, patch) {
+async function sendAutoGlobal(patch) {
   try {
     const res = await fetch("/api/auto", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ zone: zid, ...patch }),
+      body: JSON.stringify(patch),
     });
     const payload = await res.json();
     if (!res.ok) throw new Error(payload.detail || res.statusText);
     state.remote = payload;
     if (payload.data) state.local = structuredClone(payload.data.aircons.ac1);
     render();
-    if (patch.enabled === true) toast("Auto engaged — the app now holds this zone's target.");
-    if (patch.enabled === false) toast("Auto off — zone back to manual control.");
+    if (patch.enabled === true) toast("Auto engaged — the dial now sets the target the house holds.");
+    if (patch.enabled === false) toast("Auto off — you're flying manual.");
   } catch (err) {
     toast(err.message, true);
   }
@@ -447,11 +441,11 @@ function renderHeader() {
   if (state.remote?.mock) badges.push('<span class="chip-sm warn">mock</span>');
   if (state.remote?.pending) badges.push('<span class="chip-sm warn">queued</span>');
   if (state.remote?.mqtt === false) badges.push('<span class="chip-sm warn">sensors offline</span>');
-  const autoZones = Object.values(state.local?.zones || {}).map((z) => z.auto).filter(Boolean);
-  if (autoZones.some((a) => a.enabled && a.suspended)) {
-    badges.push('<span class="chip-sm warn">auto suspended</span>');
-  } else if (autoZones.some((a) => a.enabled)) {
-    badges.push('<span class="chip-sm ok">auto</span>');
+  if (autoState().enabled) {
+    const zoneAutos = Object.values(state.local?.zones || {}).map((z) => z.auto).filter(Boolean);
+    if (!zoneAutos.length || zoneAutos.every((a) => a.suspended)) {
+      badges.push('<span class="chip-sm warn">auto suspended</span>');
+    }
   }
   if (info?.filterCleanStatus) badges.push('<span class="chip-sm warn">filter due</span>');
   if (info?.airconErrorCode) badges.push(`<span class="chip-sm bad">err ${esc(info.airconErrorCode)}</span>`);
@@ -748,10 +742,14 @@ function toast(msg, isError = false) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
 }
 
-function queueSetTemp() {
+function commitDial() {
   clearTimeout(state.tempTimer);
   state.tempTimer = setTimeout(() => {
-    sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("dial"));
+    if (autoState().enabled) {
+      sendAutoGlobal({ target: state.remote.auto.target });
+    } else {
+      sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("dial"));
+    }
   }, 600);
 }
 
@@ -795,16 +793,22 @@ function buildControls() {
   $("powerBtn").addEventListener("click", () => {
     sendChange({ info: { state: state.local.info.state === "on" ? "off" : "on" } }, $("powerBtn"));
   });
+  $("autoBtn").addEventListener("click", () => {
+    sendAutoGlobal({ enabled: !autoState().enabled });
+  });
 }
 
-function nudge(delta) {
+function nudge(direction) {
   if (!state.local) return;
   if (lock.locked) { lockedNudge(); return; }
   armRelock();
-  const info = state.local.info;
-  info.setTemp = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(info.setTemp) + delta));
+  const auto = autoState();
+  const step = auto.enabled ? 0.5 : 1;
+  const next = Math.max(TEMP_MIN, Math.min(TEMP_MAX, dialValue() + direction * step));
+  if (auto.enabled) state.remote.auto.target = next;
+  else state.local.info.setTemp = next;
   renderHero();
-  queueSetTemp();
+  commitDial();
 }
 
 function init() {

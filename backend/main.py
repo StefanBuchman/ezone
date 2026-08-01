@@ -275,7 +275,9 @@ AUTO_INTERVAL = 60
 OVERRIDE_S = 3600  # manual changes silence auto on that scope for an hour
 
 pilot = Autopilot()
-auto_cfg: dict[str, dict] = {}   # zid -> {"enabled": bool, "target": float}
+# One master switch and one master target: when auto is on, the dial's value
+# IS the target and the loop manages sensor-equipped zones toward it.
+auto_cfg: dict = {"enabled": False, "target": 21.0}
 overrides: dict[str, float] = {}  # scope -> expiry timestamp
 
 
@@ -286,9 +288,29 @@ def _auto_path() -> Path:
 def _load_auto() -> None:
     global auto_cfg
     try:
-        auto_cfg = json.loads(_auto_path().read_text())
-    except (OSError, ValueError):
-        auto_cfg = {}
+        stored = json.loads(_auto_path().read_text())
+        if "target" in stored and not isinstance(stored.get("target"), dict):
+            auto_cfg = {"enabled": bool(stored.get("enabled")), "target": float(stored["target"])}
+        else:  # migrate the short-lived per-zone shape
+            zones = [c for c in stored.values() if isinstance(c, dict)]
+            enabled = [c for c in zones if c.get("enabled")]
+            auto_cfg = {
+                "enabled": bool(enabled),
+                "target": float((enabled or zones or [{"target": 21.0}])[0].get("target", 21.0)),
+            }
+    except (OSError, ValueError, TypeError):
+        auto_cfg = {"enabled": False, "target": 21.0}
+
+
+def _pilot_cfg() -> dict:
+    """Sensor-equipped zones all follow the master target while auto is on."""
+    if not auto_cfg["enabled"] or cache.data is None or feed is None:
+        return {}
+    cfg = {}
+    for zid, zone in cache.data["aircons"]["ac1"]["zones"].items():
+        if feed.reading_for_zone(zid, zone["name"]) is not None:
+            cfg[zid] = {"enabled": True, "target": auto_cfg["target"]}
+    return cfg
 
 
 def _save_auto() -> None:
@@ -333,7 +355,7 @@ async def _auto_loop() -> None:
 
 
 async def _auto_tick() -> None:
-    if not any(c.get("enabled") for c in auto_cfg.values()):
+    if not auto_cfg["enabled"]:
         return
     if not cache.ok or cache.data is None or feed is None:
         return  # tablet asleep or no sensors: stand down this tick
@@ -341,7 +363,7 @@ async def _auto_tick() -> None:
     readings = {
         zid: feed.reading_for_zone(zid, z["name"]) for zid, z in ac["zones"].items()
     }
-    change, logs = pilot.tick(auto_cfg, ac, readings, _active_overrides(), time.time())
+    change, logs = pilot.tick(_pilot_cfg(), ac, readings, _active_overrides(), time.time())
     for line in logs:
         await asyncio.to_thread(_auto_log, "decide", line)
     if not change:
@@ -476,11 +498,10 @@ def _state_payload() -> dict:
                 zone["sensor"] = reading
                 if not reading["stale"] and reading["temperature"] is not None:
                     zone["measuredTemp"] = reading["temperature"]
-    if data:
+    if data and feed:
         for zid, zone in data["aircons"]["ac1"]["zones"].items():
-            cfg = auto_cfg.get(zid)
-            if cfg:
-                zone["auto"] = {**cfg, **pilot.zone_status(zid)}
+            if zone.get("sensor") is not None:
+                zone["auto"] = pilot.zone_status(zid)
     return {
         "ok": cache.ok,
         "ageSeconds": round(time.time() - cache.fetched_at, 1) if cache.data else None,
@@ -490,6 +511,7 @@ def _state_payload() -> dict:
         "pending": pending is not None,
         "pendingAgeSeconds": round(time.time() - pending_at, 1) if pending else None,
         "recentPaths": [e["path"] for e in recent],
+        "auto": dict(auto_cfg),
         "outdoor": outdoor["temp"] if time.time() - outdoor["at"] < 7200 else None,
         "data": data,
     }
@@ -667,7 +689,6 @@ async def filter_cleaned():
 
 
 class AutoChange(BaseModel):
-    zone: str
     enabled: typing.Optional[bool] = None
     target: typing.Optional[float] = None
 
@@ -676,25 +697,24 @@ class AutoChange(BaseModel):
 async def set_auto(change: AutoChange):
     if cache.data is None:
         await _refresh()
-    zones = cache.data["aircons"]["ac1"]["zones"] if cache.data else {}
-    if change.zone not in zones:
-        raise HTTPException(422, f"unknown zone '{change.zone}'")
-    cfg = auto_cfg.setdefault(change.zone, {"enabled": False, "target": 21.0})
     if change.target is not None:
-        cfg["target"] = max(16.0, min(32.0, round(change.target * 2) / 2))
+        auto_cfg["target"] = max(16.0, min(32.0, round(change.target * 2) / 2))
     if change.enabled is not None:
-        cfg["enabled"] = change.enabled
-        # engaging auto is consent for auto to act now on these scopes
+        auto_cfg["enabled"] = change.enabled
         if change.enabled:
-            for scope in ("power", "setTemp", f"zone:{change.zone}"):
-                overrides.pop(scope, None)
+            # engaging auto is consent for auto to act now on every scope it drives
+            overrides.pop("power", None)
+            overrides.pop("setTemp", None)
+            for zid in _pilot_cfg():
+                overrides.pop(f"zone:{zid}", None)
         else:
-            pilot.calling.pop(change.zone, None)
-            pilot.suspended.pop(change.zone, None)
+            pilot.calling.clear()
+            pilot.suspended.clear()
+            pilot.owns_power = False
     _save_auto()
     await asyncio.to_thread(
         _auto_log, "config",
-        f"{change.zone}: enabled={cfg['enabled']} target={cfg['target']}",
+        f"auto enabled={auto_cfg['enabled']} target={auto_cfg['target']}",
     )
     return _state_payload()
 
