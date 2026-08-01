@@ -23,14 +23,12 @@
     <div class="hdr-right">
       <span id="badges"></span>
       <span class="chip-sm" id="outdoorChip" hidden></span>
-      <button class="theme-btn" id="actBtn" aria-label="Activity log">
-        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l2.6 2.6"/>
-        </svg>
-      </button>
       <button class="theme-btn" id="themeBtn" aria-label="Toggle theme">&#9681;</button>
     </div>
   </header>
+
+  <!-- ================= tab · control ================= -->
+  <div class="tab-pane active" id="tab-control" role="tabpanel" aria-label="Control">
 
   <!-- 2 · hero -->
   <section class="hero">
@@ -91,24 +89,6 @@
     </div>
   </section>
 
-  <!-- 4 · today -->
-  <section class="card today-card" id="todayCard" hidden>
-    <div>
-      <div class="lbl" id="todayTitle">Runtime today</div>
-      <div class="today-big" id="todayRuntime">0m</div>
-      <div class="lbl" id="todaySub"></div>
-      <button class="lbl filter-btn" id="filterBtn" hidden></button>
-    </div>
-    <svg id="spark" width="118" height="38" viewBox="0 0 118 38" aria-label="Hours the system ran today"></svg>
-  </section>
-
-  <!-- 4b · temperature history -->
-  <section class="card temps-card" id="tempsCard" hidden>
-    <div class="lbl">Temperature &middot; last 24h</div>
-    <svg id="tempChart" height="120" aria-label="Zone temperature over the last 24 hours"></svg>
-    <div class="temps-legend" id="tempsLegend"></div>
-  </section>
-
   <!-- 5 · zones -->
   <div class="sec-lbl">Zones</div>
   <div id="zoneList"></div>
@@ -120,17 +100,13 @@
   <!-- 7 · footer -->
   <footer class="foot" id="footInfo"></footer>
 
-</div>
+  </div><!-- /tab-control -->
 
-<!-- activity sheet: the flight recorder -->
-<div class="sheet" id="actSheet" aria-hidden="true" role="dialog" aria-label="Activity log">
-  <div class="sheet-inner">
-    <header class="sheet-hdr">
-      <div>
-        <div class="sheet-title">Activity</div>
-        <div class="sheet-sub">everything that moved, and who moved it</div>
-      </div>
-      <button class="theme-btn sheet-close" id="actClose" aria-label="Close activity">&#10005;</button>
+  <!-- ================= tab · activity ================= -->
+  <div class="tab-pane" id="tab-activity" role="tabpanel" aria-label="Activity">
+    <header class="pane-hdr">
+      <div class="pane-title">Activity</div>
+      <div class="pane-sub">everything that moved, and who moved it</div>
     </header>
     <div class="act-filters" id="actFilters">
       <button class="chip-btn active" data-src="">all</button>
@@ -138,7 +114,7 @@
       <button class="chip-btn" data-src="auto">auto</button>
       <button class="chip-btn" data-src="wall,system">wall &amp; system</button>
     </div>
-    <div class="act-scroll" id="actScroll">
+    <div id="actScroll">
       <button class="act-new" id="actNew" hidden>&#8593; new activity</button>
       <div id="actList"></div>
       <div class="act-more" id="actMore" hidden>&#8230;</div>
@@ -147,8 +123,59 @@
         Nothing recorded yet.<br>The flight recorder starts with the next change.
       </div>
     </div>
-  </div>
+  </div><!-- /tab-activity -->
+
+  <!-- ================= tab · trends ================= -->
+  <div class="tab-pane" id="tab-trends" role="tabpanel" aria-label="Trends">
+    <header class="pane-hdr">
+      <div class="pane-title">Trends</div>
+      <div class="pane-sub">how the house is running</div>
+    </header>
+
+    <!-- 4 · today -->
+    <section class="card today-card" id="todayCard" hidden>
+      <div>
+        <div class="lbl" id="todayTitle">Runtime today</div>
+        <div class="today-big" id="todayRuntime">0m</div>
+        <div class="lbl" id="todaySub"></div>
+        <button class="lbl filter-btn" id="filterBtn" hidden></button>
+      </div>
+      <svg id="spark" width="118" height="38" viewBox="0 0 118 38" aria-label="Hours the system ran today"></svg>
+    </section>
+
+    <!-- 4b · temperature history -->
+    <section class="card temps-card" id="tempsCard" hidden>
+      <div class="lbl">Temperature &middot; last 24h</div>
+      <svg id="tempChart" height="120" aria-label="Zone temperature over the last 24 hours"></svg>
+      <div class="temps-legend" id="tempsLegend"></div>
+    </section>
+  </div><!-- /tab-trends -->
+
 </div>
+
+<!-- bottom tab bar -->
+<nav class="tabbar" role="tablist" aria-label="Sections">
+  <div class="tabbar-inner">
+    <button class="tab-btn active" id="tabBtn-control" data-tab="control" role="tab" aria-selected="true">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v4.5l3 2"/><path d="M12 3.8v-1M20.2 12h1M12 20.2v1M3.8 12h-1" opacity="0.55"/>
+      </svg>
+      <span>Control</span>
+    </button>
+    <button class="tab-btn" id="tabBtn-activity" data-tab="activity" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12h3l2.5-6 4 12 2.5-6h4"/>
+      </svg>
+      <span>Activity</span>
+    </button>
+    <button class="tab-btn" id="tabBtn-trends" data-tab="trends" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19V5M4 19h16"/><path d="M7.5 14.5l3.5-4 3 2.5 4.5-6"/>
+      </svg>
+      <span>Trends</span>
+    </button>
+  </div>
+</nav>
 
 <div class="toast" id="toast" role="status"></div>
 

@@ -267,7 +267,7 @@ The autopilot audit trail, newest first.
 
 ## `GET /api/activity`
 
-The unified activity feed behind the app's Activity sheet: every change to the
+The unified activity feed behind the app's Activity tab: every change to the
 system, newest first, attributed to whoever made it. Structured — the client
 composes the sentences.
 

@@ -967,6 +967,7 @@ function renderActivity(animate) {
 async function fetchActivity(reset) {
   if (ACT.loading) return;
   ACT.loading = true;
+  if (reset) $("actNew").hidden = true;
   $("actMore").hidden = false;
   try {
     const before = reset || !ACT.entries.length ? 0 : ACT.entries[ACT.entries.length - 1].ts;
@@ -978,7 +979,7 @@ async function fetchActivity(reset) {
     ACT.more = data.more;
     if (ACT.entries.length) ACT.newest = Math.max(ACT.newest, ACT.entries[0].ts);
     renderActivity(reset);
-    if (reset) $("actScroll").scrollTop = 0;
+    if (reset) window.scrollTo({ top: 0 });
     $("actNew").hidden = true;
   } catch (err) {
     toast(`Couldn't load activity: ${err.message}`, true);
@@ -996,33 +997,8 @@ async function checkNewActivity() {
   } catch { /* quiet */ }
 }
 
-function openActivity() {
-  if (ACT.open) return;
-  ACT.open = true;
-  $("actSheet").classList.add("open");
-  $("actSheet").setAttribute("aria-hidden", "false");
-  document.body.classList.add("no-scroll");
-  history.pushState({ act: 1 }, "");
-  fetchActivity(true);
-  ACT.poll = setInterval(checkNewActivity, 25000);
-}
-
-function closeActivity(fromPop) {
-  if (!ACT.open) return;
-  ACT.open = false;
-  $("actSheet").classList.remove("open");
-  $("actSheet").setAttribute("aria-hidden", "true");
-  document.body.classList.remove("no-scroll");
-  clearInterval(ACT.poll);
-  if (!fromPop && history.state && history.state.act) history.back();
-}
-
 function initActivity() {
-  $("actBtn").addEventListener("click", openActivity);
-  $("actClose").addEventListener("click", () => closeActivity(false));
   $("actNew").addEventListener("click", () => fetchActivity(true));
-  window.addEventListener("popstate", () => closeActivity(true));
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeActivity(false); });
   $("actFilters").addEventListener("click", (e) => {
     const btn = e.target.closest(".chip-btn");
     if (!btn) return;
@@ -1030,10 +1006,48 @@ function initActivity() {
     document.querySelectorAll("#actFilters .chip-btn").forEach((b) => b.classList.toggle("active", b === btn));
     fetchActivity(true);
   });
-  $("actScroll").addEventListener("scroll", () => {
-    const el = $("actScroll");
-    if (ACT.more && !ACT.loading && el.scrollTop + el.clientHeight > el.scrollHeight - 240) fetchActivity(false);
+  window.addEventListener("scroll", () => {
+    if (activeTab !== "activity" || !ACT.more || ACT.loading) return;
+    if (window.innerHeight + window.scrollY > document.body.offsetHeight - 400) fetchActivity(false);
+  }, { passive: true });
+}
+
+/* ================= tabs ================= */
+
+const TAB_NAMES = ["control", "activity", "trends"];
+let activeTab = "control";
+
+function activateTab(name, via) {
+  if (!TAB_NAMES.includes(name)) name = "control";
+  const changed = name !== activeTab;
+  activeTab = name;
+  TAB_NAMES.forEach((t) => {
+    $(`tab-${t}`).classList.toggle("active", t === name);
+    const btn = $(`tabBtn-${t}`);
+    btn.classList.toggle("active", t === name);
+    btn.setAttribute("aria-selected", String(t === name));
   });
+  if (changed) window.scrollTo({ top: 0 });
+  clearInterval(ACT.poll);
+  if (name === "activity") {
+    fetchActivity(true);
+    ACT.poll = setInterval(checkNewActivity, 25000);
+  }
+  const hash = name === "control" ? "" : `#${name}`;
+  if (via === "click" && location.hash !== hash) {
+    history.pushState(null, "", hash || location.pathname + location.search);
+  }
+}
+
+function initTabs() {
+  document.querySelectorAll(".tab-btn").forEach((b) =>
+    b.addEventListener("click", () => activateTab(b.dataset.tab, "click"))
+  );
+  window.addEventListener("hashchange", () =>
+    activateTab(location.hash.replace("#", "") || "control", "hash")
+  );
+  const initial = location.hash.replace("#", "");
+  if (initial && initial !== "control") activateTab(initial, "hash");
 }
 
 function init() {
@@ -1041,6 +1055,7 @@ function init() {
   buildDial();
   buildControls();
   initActivity();
+  initTabs();
   initDialLock();
   initDialDrag();
   $("filterBtn").addEventListener("click", async () => {

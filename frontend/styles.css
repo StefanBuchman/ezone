@@ -38,8 +38,8 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 .page {
   max-width: 430px; margin: 0 auto;
-  /* bottom: safe-area and padding share, not stack */
-  padding: 16px 18px max(20px, env(safe-area-inset-bottom, 20px));
+  /* bottom padding clears the fixed tab bar */
+  padding: 16px 18px calc(78px + env(safe-area-inset-bottom, 0px));
   display: flex; flex-direction: column; gap: 16px;
 }
 
@@ -346,33 +346,43 @@ input[type="range"]::-moz-range-thumb {
 .dial-wrap.pending #handleI { animation: syncpulse 1s ease-in-out infinite; }
 @keyframes syncpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.2; } }
 
-/* ---- activity sheet · the flight recorder ---- */
-body.no-scroll { overflow: hidden; }
-.sheet {
-  position: fixed; inset: 0; z-index: 9; background: var(--bg);
-  transform: translateY(103%); visibility: hidden;
-  transition: transform 0.34s cubic-bezier(0.32, 0.72, 0, 1), visibility 0s 0.34s;
+/* ---- tabs ---- */
+.tab-pane { display: none; }
+.tab-pane.active {
+  display: flex; flex-direction: column; gap: 16px;
+  animation: pane-in 0.22s ease;
 }
-.sheet.open { transform: translateY(0); visibility: visible; transition-delay: 0s; }
-.sheet-inner {
-  max-width: 430px; margin: 0 auto; height: 100%;
-  display: flex; flex-direction: column;
-  padding: max(16px, env(safe-area-inset-top)) 18px 0;
-}
-.sheet-hdr { display: flex; justify-content: space-between; align-items: flex-start; }
-.sheet-title { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-.sheet-sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
-.sheet-close { flex-shrink: 0; }
+@keyframes pane-in { from { opacity: 0; transform: translateY(6px); } }
 
-.act-filters { display: flex; gap: 6px; margin: 14px 0 4px; }
+.pane-hdr { margin-top: 2px; }
+.pane-title { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+.pane-sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
+
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border-top: 1px solid var(--ln);
+}
+.tabbar-inner {
+  max-width: 430px; margin: 0 auto;
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  padding: 6px 14px calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.tab-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  padding: 7px 0 3px; color: var(--dim);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  transition: color 0.15s;
+}
+.tab-btn.active { color: var(--acc); }
+.tab-btn svg { transition: transform 0.15s; }
+.tab-btn:active svg { transform: scale(0.88); }
+
+/* ---- activity tab · the flight recorder ---- */
+.act-filters { display: flex; gap: 6px; }
 .act-filters .chip-btn { padding: 6px 12px; }
 
-.act-scroll {
-  flex: 1; overflow-y: auto; overscroll-behavior: contain;
-  margin: 0 -18px; padding: 4px 18px max(24px, env(safe-area-inset-bottom));
-  -webkit-mask-image: linear-gradient(transparent, #000 12px);
-          mask-image: linear-gradient(transparent, #000 12px);
-}
 .act-new {
   position: sticky; top: 6px; z-index: 3;
   display: block; margin: 0 auto 4px;
