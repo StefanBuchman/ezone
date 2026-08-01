@@ -476,32 +476,34 @@ async def get_history(hours: int = Query(24, ge=1, le=24 * 30)):
 
 @app.get("/api/today")
 async def today():
-    """Today's runtime, cycle count, and room-temp series for the dashboard card."""
+    """Today's runtime (total, per mode, per hour) and cycle count."""
     lt = time.localtime()
     midnight = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
     rows = db.execute(
-        "SELECT ts, state, zones FROM snapshots WHERE ts >= ? ORDER BY ts", (midnight,)
+        "SELECT ts, state, mode FROM snapshots WHERE ts >= ? ORDER BY ts", (midnight,)
     ).fetchall()
     runtime = 0
     cycles = 0
-    series: list[list] = []
-    prev_ts = prev_state = None
-    for ts, st, zones_json in rows:
+    by_mode: dict[str, int] = {}
+    hourly: dict[int, int] = {}
+    prev_ts = prev_state = prev_mode = None
+    for ts, st, mode in rows:
         if prev_ts is not None and prev_state == "on":
-            runtime += min(ts - prev_ts, POLL_SECONDS * 4)  # cap over gaps/outages
+            dur = min(ts - prev_ts, POLL_SECONDS * 4)  # cap over gaps/outages
+            runtime += dur
+            by_mode[prev_mode] = by_mode.get(prev_mode, 0) + dur
+            hour = (prev_ts - midnight) // 3600
+            hourly[hour] = hourly.get(hour, 0) + dur
         if st == "on" and prev_state != "on":
             cycles += 1
-        try:
-            temps = [z.get("measuredTemp") for z in json.loads(zones_json).values()]
-            # pre-sensor rows recorded the tablet's constant 0.0 — not real readings
-            temps = [t for t in temps if t is not None and t != 0]
-        except (ValueError, AttributeError):
-            temps = []
-        if temps:
-            series.append([ts, temps[0]])
-        prev_ts, prev_state = ts, st
-    step = max(1, len(series) // 48)
-    return {"runtimeSeconds": runtime, "cycles": cycles, "series": series[::step]}
+        prev_ts, prev_state, prev_mode = ts, st, mode
+    return {
+        "runtimeSeconds": runtime,
+        "cycles": cycles,
+        "byMode": {m: s for m, s in by_mode.items() if m and s},
+        "hourly": [[h, s] for h, s in sorted(hourly.items())],
+        "hourNow": (int(time.time()) - midnight) // 3600,
+    }
 
 
 @app.get("/api/temps")

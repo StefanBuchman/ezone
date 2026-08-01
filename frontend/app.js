@@ -360,26 +360,44 @@ function renderHeader() {
   }
 }
 
+const MODE_TITLES = { heat: "Heating today", cool: "Cooling today", vent: "Venting today", dry: "Drying today" };
+
 function renderToday() {
   const card = $("todayCard");
   const t = state.today;
   if (!t) { card.hidden = true; return; }
   card.hidden = false;
-  $("todayRuntime").textContent = fmtMins(Math.round(t.runtimeSeconds / 60));
-  const filter = state.local?.info?.filterCleanStatus ? "filter due" : "filter ok";
-  $("todaySub").textContent = `${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"} · ${filter}`;
 
+  const modes = Object.keys(t.byMode || {});
+  $("todayTitle").textContent =
+    modes.length === 1 ? (MODE_TITLES[modes[0]] || "Runtime today") : "Runtime today";
+  $("todayRuntime").textContent = fmtMins(Math.round(t.runtimeSeconds / 60));
+
+  const filter = state.local?.info?.filterCleanStatus ? "filter due" : "filter ok";
+  const parts = [];
+  if (modes.length > 1) {
+    parts.push(modes.map((m) => `${m} ${fmtMins(Math.round(t.byMode[m] / 60))}`).join(" · "));
+  }
+  parts.push(`${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"}`, filter);
+  $("todaySub").textContent = parts.join(" · ");
+
+  // hourly runtime strip: one bar per hour of today, height = minutes run
   const svg = $("spark");
-  const pts = (t.series || []).filter((p) => p[1] != null);
-  if (pts.length < 2) { svg.innerHTML = ""; return; }
-  const temps = pts.map((p) => p[1]);
-  const tmin = Math.min(...temps), tmax = Math.max(...temps);
-  const span = Math.max(tmax - tmin, 0.5);
-  const X = (i) => 2 + (i / (pts.length - 1)) * 112;
-  const Y = (v) => 33 - ((v - tmin) / span) * 28;
-  const poly = pts.map((p, i) => `${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
-  const last = pts[pts.length - 1];
-  svg.innerHTML = `<polyline points="${poly}"/><circle cx="${X(pts.length - 1).toFixed(1)}" cy="${Y(last[1]).toFixed(1)}" r="3"/>`;
+  const byHour = new Map(t.hourly || []);
+  const hours = Math.max(Number(t.hourNow) + 1 || 24, 1);
+  const slot = 118 / 24;
+  let out = `<line x1="1" x2="117" y1="35.5" y2="35.5" stroke="var(--ln)" stroke-width="1"/>`;
+  for (let h = 0; h < 24; h++) {
+    const sec = byHour.get(h) || 0;
+    const x = (h * slot + 1).toFixed(1);
+    if (sec > 0) {
+      const barH = Math.max(3, (sec / 3600) * 30);
+      out += `<rect x="${x}" y="${(34 - barH).toFixed(1)}" width="${(slot - 1.6).toFixed(1)}" height="${barH.toFixed(1)}" rx="1" fill="var(--acc)"/>`;
+    } else if (h < hours) {
+      out += `<rect x="${x}" y="33" width="${(slot - 1.6).toFixed(1)}" height="1.5" rx="0.75" fill="var(--dim)" opacity="0.35"/>`;
+    }
+  }
+  svg.innerHTML = out;
 }
 
 function renderFoot() {
