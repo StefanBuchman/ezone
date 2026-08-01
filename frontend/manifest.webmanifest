@@ -1,0 +1,13 @@
+{
+  "name": "e-zone",
+  "short_name": "e-zone",
+  "description": "Advantage Air e-zone climate control",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0B1014",
+  "theme_color": "#0B1014",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,305 @@
+{
+ "aircons": {
+  "ac1": {
+   "info": {
+    "aaAutoFanModeEnabled": false,
+    "activationCodeStatus": "noCode",
+    "airconErrorCode": "",
+    "cbFWRevMajor": 6,
+    "cbFWRevMinor": 16,
+    "cbType": 0,
+    "climateControlModeIsRunning": false,
+    "constant1": 0,
+    "constant2": 0,
+    "constant3": 0,
+    "countDownToOff": 0,
+    "countDownToOn": 0,
+    "fan": "medium",
+    "filterCleanStatus": 0,
+    "freshAirStatus": "none",
+    "mode": "heat",
+    "myAutoModeCurrentSetMode": "heat",
+    "myAutoModeIsRunning": false,
+    "myZone": 0,
+    "name": "AC",
+    "noOfConstants": 0,
+    "noOfZones": 2,
+    "quietNightModeEnabled": false,
+    "quietNightModeIsRunning": false,
+    "rfSysID": 0,
+    "setTemp": 24.0,
+    "state": "off",
+    "uid": "aabbccddeeff",
+    "unitType": 17
+   },
+   "zones": {
+    "z01": {
+     "error": 0,
+     "maxDamper": 100,
+     "measuredTemp": 0.0,
+     "minDamper": 0,
+     "motion": 0,
+     "motionConfig": 0,
+     "name": "Downstairs",
+     "number": 1,
+     "rssi": 0,
+     "setTemp": 24.0,
+     "state": "open",
+     "tempSensorClash": false,
+     "type": 0,
+     "value": 100
+    },
+    "z02": {
+     "error": 0,
+     "maxDamper": 100,
+     "measuredTemp": 0.0,
+     "minDamper": 0,
+     "motion": 0,
+     "motionConfig": 0,
+     "name": "Upstairs",
+     "number": 2,
+     "rssi": 0,
+     "setTemp": 24.0,
+     "state": "close",
+     "tempSensorClash": false,
+     "type": 0,
+     "value": 100
+    }
+   }
+  }
+ },
+ "myAddOns": {
+  "hueBridges": {},
+  "hueBridgesOrder": []
+ },
+ "myGarageRFControllers": {
+  "garageControllers": {},
+  "garageControllersOrder": []
+ },
+ "myLights": {
+  "groups": {},
+  "groupsOrder": [],
+  "lights": {},
+  "system": {
+   "sunsetTime": "05:07 PM"
+  }
+ },
+ "myMonitors": {
+  "monitors": {},
+  "monitorsOrder": []
+ },
+ "myScenes": {
+  "scenes": {
+   "s10001": {
+    "activeDays": 62,
+    "airconStopTime": 450,
+    "airconStopTimeEnabled": true,
+    "aircons": {
+     "ac1": {
+      "info": {
+       "fan": "medium",
+       "freshAirStatus": "none",
+       "mode": "heat",
+       "myZone": 0,
+       "name": "Aircon",
+       "setTemp": 24.0,
+       "state": "on",
+       "uid": "aabbccddeeff"
+      },
+      "zones": {
+       "z01": {
+        "motionConfig": 0,
+        "number": 1,
+        "setTemp": 24.0,
+        "state": "open",
+        "tempSensorClash": false,
+        "value": 100
+       },
+       "z02": {
+        "motionConfig": 0,
+        "number": 2,
+        "setTemp": 24.0,
+        "state": "open",
+        "tempSensorClash": false,
+        "value": 100
+       }
+      }
+     }
+    },
+    "id": "s10001",
+    "lights": {},
+    "monitors": {},
+    "myTimeEnabled": false,
+    "name": "Winter Early",
+    "sonos": {},
+    "startTime": 405,
+    "summary": "Days this scene will run:\nMonday, Tuesday, Wednesday, Thursday, Friday\n\nAircon: on, mode: heat, fan speed: med, 24\u00b0C\nopen zones:\nDownstairs, Upstairs",
+    "things": {},
+    "timerEnabled": true
+   },
+   "s10002": {
+    "activeDays": 62,
+    "airconStopTime": 495,
+    "airconStopTimeEnabled": true,
+    "aircons": {
+     "ac1": {
+      "info": {
+       "fan": "medium",
+       "freshAirStatus": "none",
+       "mode": "heat",
+       "myZone": 0,
+       "name": "Aircon",
+       "setTemp": 24.0,
+       "state": "on",
+       "uid": "aabbccddeeff"
+      },
+      "zones": {
+       "z01": {
+        "motionConfig": 0,
+        "number": 1,
+        "setTemp": 24.0,
+        "state": "open",
+        "tempSensorClash": false,
+        "value": 100
+       },
+       "z02": {
+        "motionConfig": 0,
+        "number": 2,
+        "setTemp": 24.0,
+        "state": "open",
+        "tempSensorClash": false,
+        "value": 80
+       }
+      }
+     }
+    },
+    "id": "s10002",
+    "lights": {},
+    "monitors": {},
+    "myTimeEnabled": false,
+    "name": "School",
+    "sonos": {},
+    "startTime": 420,
+    "summary": "Days this scene will run:\nMonday, Tuesday, Wednesday, Thursday, Friday\n\nAircon: on, mode: heat, fan speed: med, 24\u00b0C\nopen zones:\nDownstairs, Upstairs",
+    "things": {},
+    "timerEnabled": false
+   },
+   "s10003": {
+    "activeDays": 65,
+    "airconStopTime": 270,
+    "airconStopTimeEnabled": true,
+    "aircons": {
+     "ac1": {
+      "info": {
+       "fan": "medium",
+       "freshAirStatus": "none",
+       "mode": "heat",
+       "myZone": 0,
+       "name": "AC",
+       "setTemp": 22.0,
+       "state": "on",
+       "uid": "aabbccddeeff"
+      },
+      "zones": {
+       "z01": {
+        "motionConfig": 0,
+        "number": 1,
+        "setTemp": 24.0,
+        "state": "close",
+        "tempSensorClash": false,
+        "value": 100
+       },
+       "z02": {
+        "motionConfig": 0,
+        "number": 2,
+        "setTemp": 24.0,
+        "state": "open",
+        "tempSensorClash": false,
+        "value": 100
+       }
+      }
+     }
+    },
+    "id": "s10003",
+    "lights": {},
+    "monitors": {},
+    "myTimeEnabled": false,
+    "name": "W Mid",
+    "sonos": {},
+    "startTime": 240,
+    "summary": "Days this scene will run:\nSaturday, Sunday\n\nAircon: on, mode: heat, fan speed: med, 22\u00b0C\nopen zones:\nUpstairs",
+    "things": {},
+    "timerEnabled": false
+   }
+  },
+  "scenesOrder": [
+   "s10001",
+   "s10002",
+   "s10003"
+  ]
+ },
+ "mySensors": {
+  "sensors": {},
+  "sensorsOrder": []
+ },
+ "myThings": {
+  "groups": {},
+  "groupsOrder": [],
+  "system": {},
+  "things": {}
+ },
+ "myView": {
+  "locks": []
+ },
+ "snapshots": {},
+ "system": {
+  "aaServiceRev": "14.116",
+  "allTspErrorCodes": {},
+  "backupId": "00000000-0000-0000-0000-000000000000",
+  "country": "Australia",
+  "deletedDevices": {},
+  "deviceIds": [
+   "demo-device-id"
+  ],
+  "deviceIdsV2": {
+   "demo-device-id": "demo-push-token"
+  },
+  "deviceNames": {
+   "demo-device-id": "iPhone"
+  },
+  "deviceNotificationVersion": {
+   "demo-device-id": "V3"
+  },
+  "drawLightsTab": false,
+  "drawThingsTab": false,
+  "garageDoorReminderWaitTime": 2,
+  "garageDoorSecurityPinEnabled": true,
+  "hasAircons": true,
+  "hasLights": false,
+  "hasLocks": false,
+  "hasSensors": false,
+  "hasThings": false,
+  "hasThingsBOG": false,
+  "hasThingsLight": false,
+  "isValidSuburbTemp": false,
+  "latitude": 0.0,
+  "lockDoorReminderWaitTime": 2,
+  "longitude": 0.0,
+  "mid": "aabbccddeeff",
+  "myAppRev": "15.1476",
+  "name": "e-zone",
+  "needsUpdate": false,
+  "noOfAircons": 1,
+  "noOfSnapshots": 0,
+  "postCode": "0000",
+  "remoteAccessPairingEnabled": true,
+  "rid": "demo-rid",
+  "showMeasuredTemp": true,
+  "suburbTemp": 13.5,
+  "sysType": "e-zone",
+  "tspErrorCode": "noError",
+  "tspIp": "10.160.1.180",
+  "tspModel": "PIC7GS10-A",
+  "versions": {}
+ }
+}

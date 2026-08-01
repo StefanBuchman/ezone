@@ -1,0 +1,17 @@
+services:
+  ezone:
+    image: ghcr.io/stefanbuchman/ezone:latest
+    container_name: ezone
+    restart: unless-stopped
+    ports:
+      - "8321:8000"
+    environment:
+      EZONE_HOST: 10.160.1.180   # the e-zone touchscreen
+      EZONE_PORT: "2025"
+      POLL_SECONDS: "30"
+      # EZONE_MOCK: "1"          # uncomment to run against a simulated tablet
+    volumes:
+      - ezone-data:/data
+
+volumes:
+  ezone-data:

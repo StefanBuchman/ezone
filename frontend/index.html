@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>e-zone</title>
+<meta name="theme-color" content="#0B1014">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="e-zone">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="glow" id="glow" aria-hidden="true"></div>
+
+<header class="top">
+  <div class="brand">
+    <span class="brand-mark" id="statusDot" title="connection"></span>
+    <span class="brand-name">e&#8209;zone</span>
+  </div>
+  <div class="top-badges" id="topBadges"></div>
+</header>
+
+<main class="layout">
+
+  <!-- ============ dial + primary controls ============ -->
+  <section class="panel hero" aria-label="Temperature control">
+    <div class="dial-wrap">
+      <svg id="dial" viewBox="0 0 300 240" role="img" aria-label="Set temperature dial">
+        <g id="dialTicks"></g>
+        <path id="dialTrack" fill="none" stroke-linecap="round"></path>
+        <path id="dialArc" fill="none" stroke-linecap="round"></path>
+        <circle id="dialTip" r="7"></circle>
+      </svg>
+      <div class="dial-center">
+        <span class="dial-label" id="dialLabel">set to</span>
+        <span class="dial-temp"><span id="setTemp">--</span><span class="dial-unit">&deg;</span></span>
+        <span class="dial-mode" id="dialMode">&nbsp;</span>
+      </div>
+    </div>
+
+    <div class="primary-controls">
+      <button class="round-btn" id="tempDown" aria-label="Lower set temperature">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="power-btn" id="powerBtn" aria-label="Power">
+        <svg viewBox="0 0 24 24">
+          <path d="M12 3v8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M6.6 6.6a8 8 0 1 0 10.8 0" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+        <span id="powerLabel">off</span>
+      </button>
+      <button class="round-btn" id="tempUp" aria-label="Raise set temperature">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div class="seg" id="modeSeg" role="radiogroup" aria-label="Mode">
+      <button class="seg-btn" data-mode="heat" role="radio">
+        <svg viewBox="0 0 24 24"><path d="M12 3c1 3.5-3.5 5-3.5 9a5.5 5.5 0 0 0 11 0c0-2.5-1.5-4-2.5-5-.3 1.6-1 2.4-2 3 .3-2.8-.8-5.6-3-7z" fill="currentColor"/></svg>
+        heat
+      </button>
+      <button class="seg-btn" data-mode="cool" role="radio">
+        <svg viewBox="0 0 24 24"><path d="M12 2v20M4 6l16 12M4 18L20 6M12 2l-2.5 3M12 2l2.5 3M12 22l-2.5-3m2.5 3l2.5-3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        cool
+      </button>
+      <button class="seg-btn" data-mode="vent" role="radio">
+        <svg viewBox="0 0 24 24"><path d="M4 7h9a3 3 0 1 0-3-3M4 12h14a3 3 0 1 1-3 3M4 17h7a2.5 2.5 0 1 1-2.5 2.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        vent
+      </button>
+      <button class="seg-btn" data-mode="dry" role="radio">
+        <svg viewBox="0 0 24 24"><path d="M12 3.5S6 10 6 14.5a6 6 0 0 0 12 0C18 10 12 3.5 12 3.5z" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        dry
+      </button>
+    </div>
+
+    <div class="fan-row">
+      <span class="row-label">fan</span>
+      <div class="seg seg-small" id="fanSeg" role="radiogroup" aria-label="Fan speed">
+        <button class="seg-btn" data-fan="low"><span class="bars b1"><i></i></span>low</button>
+        <button class="seg-btn" data-fan="medium"><span class="bars b2"><i></i></span>med</button>
+        <button class="seg-btn" data-fan="high"><span class="bars b3"><i></i></span>high</button>
+      </div>
+    </div>
+
+    <div class="fan-row">
+      <span class="row-label">timer</span>
+      <div class="seg seg-small" id="timerChips" aria-label="Run timer">
+        <button class="seg-btn" data-min="30">30m</button>
+        <button class="seg-btn" data-min="60">1h</button>
+        <button class="seg-btn" data-min="90">1.5h</button>
+        <button class="seg-btn" data-min="120">2h</button>
+      </div>
+    </div>
+    <div class="timer-status" id="timerStatus" hidden></div>
+  </section>
+
+  <!-- ============ zones ============ -->
+  <section class="col">
+    <h2 class="sec-label">zones</h2>
+    <div id="zoneList"></div>
+
+    <h2 class="sec-label">schedules <span class="sec-note">read-only &middot; edit on wall panel</span></h2>
+    <div id="sceneList"></div>
+
+    <footer class="foot" id="footInfo"></footer>
+  </section>
+
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
