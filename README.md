@@ -7,6 +7,10 @@ system's state so the UI still works when the tablet is asleep, records history,
 and — where a room has a Zigbee temperature sensor — closes the control loop that
 the e-zone hardware itself cannot close.
 
+<p align="center">
+  <img src="docs/images/app.png" width="390" alt="The app mid heat run: auto engaged holding a 22° target, room at 19.3° and climbing, upstairs zone calling for heat, live runtime and temperature history below.">
+</p>
+
 It was written for one specific installation (a two-zone e-zone with no constant
 zone, a Sonoff Zigbee coordinator on the Docker host, deployed from GHCR). Nothing
 here is a product. It is documented well enough that you can read the code, decide

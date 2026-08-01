@@ -195,7 +195,10 @@ function initDialDrag() {
   };
 
   const applyDialValue = (t) => {
-    if (autoState().enabled) state.remote.auto.target = t;
+    // capture value AND mode now: the debounced commit must not re-decide
+    // after an auto toggle or poll response lands mid-flight
+    state.dialCommit = { auto: autoState().enabled, value: t };
+    if (state.dialCommit.auto) state.remote.auto.target = t;
     else state.local.info.setTemp = t;
     renderHero();
   };
@@ -745,10 +748,13 @@ function toast(msg, isError = false) {
 function commitDial() {
   clearTimeout(state.tempTimer);
   state.tempTimer = setTimeout(() => {
-    if (autoState().enabled) {
-      sendAutoGlobal({ target: state.remote.auto.target });
+    const c = state.dialCommit;
+    if (!c) return;
+    state.dialCommit = null;
+    if (c.auto) {
+      sendAutoGlobal({ target: c.value });
     } else {
-      sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("dial"));
+      sendChange({ info: { setTemp: Math.round(c.value) } }, $("dial"));
     }
   }, 600);
 }
@@ -805,6 +811,7 @@ function nudge(direction) {
   const auto = autoState();
   const step = auto.enabled ? 0.5 : 1;
   const next = Math.max(TEMP_MIN, Math.min(TEMP_MAX, dialValue() + direction * step));
+  state.dialCommit = { auto: auto.enabled, value: next };
   if (auto.enabled) state.remote.auto.target = next;
   else state.local.info.setTemp = next;
   renderHero();
