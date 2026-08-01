@@ -85,10 +85,11 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .room-line { font-size: 12px; color: var(--dim); }
 .room-line b { color: var(--cool); font-weight: 600; }
 .delta-chip {
-  padding: 5px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  padding: 4px 11px; border-radius: 999px; font-size: 11px; font-weight: 600;
   background: var(--chip); color: var(--dim); white-space: nowrap;
-  transition: color 0.18s;
+  transition: color 0.18s; margin-top: 2px;
 }
+.dial-center .room-line { margin-top: 2px; }
 
 /* ---- arc dial ---- */
 .dial-wrap {
@@ -156,13 +157,10 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .card {
   background: var(--pn); border: 1px solid var(--ln); border-radius: 18px;
 }
-.rows-card { padding: 0 16px; }
-.ft-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 0; gap: 10px;
-}
-.ft-row + .ft-row { border-top: 1px solid var(--ln); }
-.row-lbl { font-size: 12px; color: var(--dim); }
+.rows-card { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.ft-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.divider { height: 1px; background: var(--ln); }
+.row-lbl { font-size: 12px; color: var(--dim); width: 44px; flex-shrink: 0; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .chip-btn {
   padding: 7px 13px; border-radius: 999px; font-size: 11px; font-weight: 600;
@@ -174,24 +172,25 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 /* ---- today card ---- */
 .today-card {
   padding: 15px 16px;
-  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  display: flex; align-items: center; gap: 14px;
 }
+.today-card > div:first-child { flex: 1; }
 .today-big {
-  font-size: 23px; font-weight: 700; line-height: 1.2;
+  font-size: 23px; font-weight: 700; line-height: 1.2; margin: 3px 0 2px;
   font-variant-numeric: tabular-nums;
 }
 #spark { flex-shrink: 0; }
-#spark polyline { fill: none; stroke: var(--cool); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-#spark circle { fill: var(--cool); }
+#spark polyline { fill: none; stroke: var(--acc); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#spark circle { fill: var(--acc); }
 
 /* ---- zones ---- */
 .sec-lbl {
   font-size: 11px; font-weight: 600; letter-spacing: 0.16em;
   text-transform: uppercase; color: var(--dim);
-  margin: 2px 2px -6px;
+  margin: 6px 2px -6px;
   display: flex; align-items: baseline; gap: 10px;
 }
-.sec-note { font-size: 10px; font-weight: 400; letter-spacing: 0.02em; text-transform: none; }
+.sec-note { font-size: 10px; font-weight: 400; letter-spacing: 0.02em; text-transform: none; opacity: 0.7; }
 .zone {
   background: var(--pn); border: 1px solid var(--ln); border-radius: 18px;
   padding: 16px; margin-bottom: 0;
@@ -247,7 +246,7 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden; display: grid; gap: 1px;
 }
 .sched-row {
-  background: var(--pn); padding: 13px 16px;
+  background: var(--pn); padding: 14px 16px;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
 .sched-name { font-size: 14px; font-weight: 600; }

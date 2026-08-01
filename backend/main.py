@@ -16,6 +16,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +30,8 @@ EZONE_PORT = int(os.environ.get("EZONE_PORT", "2025"))
 EZONE_MOCK = os.environ.get("EZONE_MOCK", "0") == "1"
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
-MQTT_URL = os.environ.get("MQTT_URL", "")
+# Default assumes mosquitto in the same compose project; set MQTT_URL="" to disable.
+MQTT_URL = os.environ.get("MQTT_URL", "mqtt://mosquitto:1883")
 SENSOR_MAP = dict(
     pair.split("=", 1)
     for pair in os.environ.get("SENSOR_MAP", "").split(",")
@@ -189,6 +191,32 @@ async def _poll_loop() -> None:
         await asyncio.sleep(POLL_SECONDS)
 
 
+outdoor = {"temp": None, "at": 0.0}
+
+
+async def _outdoor_loop() -> None:
+    """Real outdoor temperature via Open-Meteo (the tablet's suburb feed can
+    lag by hours). Uses the coordinates the tablet already knows."""
+    async with httpx.AsyncClient(timeout=10.0) as web:
+        while True:
+            lat = lng = None
+            if cache.data:
+                sysd = cache.data.get("system", {})
+                lat, lng = sysd.get("latitude"), sysd.get("longitude")
+            if lat and lng:
+                try:
+                    r = await web.get(
+                        "https://api.open-meteo.com/v1/forecast",
+                        params={"latitude": lat, "longitude": lng, "current": "temperature_2m"},
+                    )
+                    outdoor["temp"] = r.json()["current"]["temperature_2m"]
+                    outdoor["at"] = time.time()
+                except Exception:  # noqa: BLE001 — weather is best-effort
+                    pass
+            # retry quickly until the first reading, then quarter-hourly
+            await asyncio.sleep(900 if outdoor["temp"] is not None else 30)
+
+
 async def _deliver_loop() -> None:
     """Keep knocking while a queued change is waiting for the tablet."""
     global pending
@@ -218,6 +246,7 @@ async def lifespan(app: FastAPI):
     tasks = [
         asyncio.create_task(_poll_loop()),
         asyncio.create_task(_deliver_loop()),
+        asyncio.create_task(_outdoor_loop()),
     ]
     if MQTT_URL:
         feed = SensorFeed(MQTT_URL, SENSOR_MAP)
@@ -249,6 +278,7 @@ def _state_payload() -> dict:
         "mqtt": feed.connected if feed else None,
         "pending": pending is not None,
         "pendingAgeSeconds": round(time.time() - pending_at, 1) if pending else None,
+        "outdoor": outdoor["temp"] if time.time() - outdoor["at"] < 7200 else None,
         "data": data,
     }
 

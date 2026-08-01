@@ -343,8 +343,13 @@ function renderHeader() {
 
   const sys = state.system;
   const chipEl = $("outdoorChip");
-  const t = Number(sys?.suburbTemp);
-  if (sys && isFinite(t) && t > -20 && t < 55 && t !== 0) {
+  // prefer live weather from the backend; fall back to the tablet's suburb
+  // feed only when the tablet itself vouches for it
+  let t = Number(state.remote?.outdoor);
+  if (!isFinite(t) || state.remote?.outdoor == null) {
+    t = sys?.isValidSuburbTemp ? Number(sys.suburbTemp) : NaN;
+  }
+  if (isFinite(t) && t > -25 && t < 55) {
     chipEl.hidden = false;
     chipEl.textContent = `${t.toFixed(1).replace(/\.0$/, "")}° outside`;
   } else {
