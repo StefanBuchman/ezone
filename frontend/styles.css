@@ -70,66 +70,56 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 /* ---- 2 · hero ---- */
 .hero {
-  border-radius: 22px; padding: 20px 18px;
+  border-radius: 22px; padding: 18px 18px 20px;
   border: 1px solid var(--ln);
   background:
-    radial-gradient(130% 110% at 15% 0%, rgba(255, 122, 69, 0.09), transparent 60%),
+    radial-gradient(130% 110% at 50% 0%, rgba(255, 122, 69, 0.09), transparent 60%),
     var(--pn);
-  display: flex; flex-direction: column; gap: 16px;
+  display: flex; flex-direction: column; gap: 14px;
 }
-.hero-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .lbl { font-size: 11px; color: var(--dim); }
 .setpoint {
-  font-size: 62px; font-weight: 700; line-height: 0.95; letter-spacing: -0.03em;
+  font-size: 58px; font-weight: 700; line-height: 0.95; letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
-.room-line { font-size: 12px; color: var(--dim); margin-top: 4px; }
+.room-line { font-size: 12px; color: var(--dim); }
 .room-line b { color: var(--cool); font-weight: 600; }
 .delta-chip {
   padding: 5px 12px; border-radius: 999px; font-size: 11px; font-weight: 600;
   background: var(--chip); color: var(--dim); white-space: nowrap;
-  transition: color 0.18s; margin-top: 2px;
+  transition: color 0.18s;
 }
 
-/* ---- tape gauge ---- */
-.tape {
-  position: relative; height: 78px; border-radius: 14px;
-  background: var(--chip); overflow: hidden;
+/* ---- arc dial ---- */
+.dial-wrap {
+  position: relative; width: 260px; height: 260px; margin: 0 auto;
   touch-action: none; cursor: grab;
 }
-.tape:active { cursor: grabbing; }
-.tape-strip {
-  position: absolute; top: 0; bottom: 0; left: 0; width: 620px;
-  transition: transform 0.16s ease-out;
-  will-change: transform;
+.dial-wrap:active { cursor: grabbing; }
+.dial-wrap svg { display: block; width: 260px; height: 260px; outline: none; }
+#dialTrack { stroke: var(--chip); }
+#dialArc { transition: stroke 0.18s; }
+.dial-wrap.dragging #dialArc { transition: none; }
+#heatGrad stop:first-child { stop-color: var(--accD); }
+#heatGrad stop:last-child { stop-color: var(--acc); }
+#roomDot { fill: var(--cool); }
+#handleO { fill: #fff; filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4)); }
+#handleI { fill: var(--acc); }
+.dial-lab {
+  position: absolute; bottom: 14px;
+  font-size: 10px; font-weight: 600; color: var(--dim);
 }
-.tape.dragging .tape-strip { transition: none; }
-.tick { position: absolute; bottom: 10px; border-radius: 2px; transform: translateX(-50%); }
-.tick.whole { width: 2.5px; height: 14px; background: var(--dim); }
-.tick.whole.even { height: 20px; }
-.tick.half { width: 1.5px; height: 8px; background: var(--ln); }
-.tick-lab {
-  position: absolute; top: 9px; transform: translateX(-50%);
-  font-size: 10px; font-weight: 600; color: var(--dim); white-space: nowrap;
+.dial-lab.min { left: 52px; }
+.dial-lab.max { right: 52px; }
+.dial-center {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; pointer-events: none; text-align: center;
 }
-.lubber {
-  position: absolute; left: 50%; top: 6px; bottom: 6px; width: 3px;
-  transform: translateX(-50%); border-radius: 2px; background: var(--acc);
-  box-shadow: 0 0 10px rgba(255, 122, 69, 0.55);
-  pointer-events: none;
-}
-.room-marker {
-  position: absolute; bottom: 10px; width: 3px; height: 16px;
-  border-radius: 2px; background: var(--cool);
-  pointer-events: none;
-}
-.drag-hint {
-  position: absolute; right: 10px; bottom: 6px;
-  font-size: 9px; font-weight: 600; color: var(--dim); pointer-events: none;
-}
+.dial-center .delta-chip { margin-top: 2px; }
 
 /* ---- stepper row ---- */
-.stepper-row { display: flex; align-items: center; gap: 12px; }
+.stepper-row { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .step-btn {
   width: 46px; height: 46px; border-radius: 50%; background: var(--chip);
   font-size: 20px; color: var(--tx);
@@ -139,7 +129,7 @@ button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .step-btn:hover { background: var(--ln); }
 .step-btn:active { transform: scale(0.92); }
 .pwr-btn {
-  width: 46px; height: 46px; border-radius: 50%; margin-left: auto;
+  width: 46px; height: 46px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   transition: background 0.18s, color 0.18s, transform 0.12s;
   background: var(--chip); color: var(--dim);

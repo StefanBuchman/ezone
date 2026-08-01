@@ -29,30 +29,38 @@
 
   <!-- 2 · hero -->
   <section class="hero">
-    <div class="hero-top">
-      <div>
-        <div class="lbl">Set to</div>
+    <div class="dial-wrap" id="dial" aria-label="Set temperature dial">
+      <svg viewBox="0 0 260 260" aria-hidden="true">
+        <defs>
+          <linearGradient id="heatGrad" x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0" stop-color="#C2451A"/>
+            <stop offset="1" stop-color="#FF7A45"/>
+          </linearGradient>
+        </defs>
+        <path id="dialTrack" fill="none" stroke-width="16" stroke-linecap="round"></path>
+        <path id="dialArc" fill="none" stroke-width="16" stroke-linecap="round"></path>
+        <circle id="roomDot" r="3.5" visibility="hidden"></circle>
+        <circle id="handleO" r="12"></circle>
+        <circle id="handleI" r="4"></circle>
+      </svg>
+      <span class="dial-lab min">16&deg;</span>
+      <span class="dial-lab max">32&deg;</span>
+      <div class="dial-center">
+        <span class="lbl">Set to</span>
         <div class="setpoint"><span id="setTemp">--</span>&deg;</div>
+        <span class="delta-chip" id="deltaChip">system off</span>
         <div class="room-line" id="roomLine">&nbsp;</div>
       </div>
-      <span class="delta-chip" id="deltaChip">system off</span>
-    </div>
-
-    <div class="tape" id="tape">
-      <div class="tape-strip" id="tapeStrip"></div>
-      <div class="lubber"></div>
-      <div class="room-marker" id="roomMarker" hidden></div>
-      <span class="drag-hint">&#8592; drag &#8594;</span>
     </div>
 
     <div class="stepper-row">
       <button class="step-btn" id="tempDown" aria-label="Lower set temperature">&#8722;</button>
-      <button class="step-btn" id="tempUp" aria-label="Raise set temperature">+</button>
       <button class="pwr-btn" id="powerBtn" aria-label="Power">
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <path d="M12 3v9"/><path d="M17.7 6.6a8 8 0 1 1-11.4 0"/>
         </svg>
       </button>
+      <button class="step-btn" id="tempUp" aria-label="Raise set temperature">+</button>
     </div>
 
     <div class="mode-grid" id="modeGrid"></div>

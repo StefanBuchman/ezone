@@ -2,7 +2,7 @@
 "use strict";
 
 const TEMP_MIN = 16, TEMP_MAX = 32;
-const TAPE_MIN = 14, TAPE_MAX = 34, PX_PER_DEG = 28;
+const DIAL = { cx: 130, cy: 130, r: 102, start: 150, sweep: 240 };
 const POLL_MS = 20000;
 const STALE_S = 600;
 
@@ -80,68 +80,95 @@ function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 }
 
-/* ================= tape gauge ================= */
+/* ================= arc dial ================= */
 
-function buildTape() {
-  const strip = $("tapeStrip");
-  strip.style.width = `${(TAPE_MAX - TAPE_MIN) * PX_PER_DEG + 1}px`;
-  let html = "";
-  for (let t = TAPE_MIN; t <= TAPE_MAX; t += 0.5) {
-    const x = (t - TAPE_MIN) * PX_PER_DEG;
-    const whole = t % 1 === 0;
-    const even = t % 2 === 0;
-    html += `<span class="tick ${whole ? "whole" : "half"}${even ? " even" : ""}" style="left:${x}px"></span>`;
-    if (even) html += `<span class="tick-lab" style="left:${x}px">${t}</span>`;
-  }
-  strip.innerHTML = html;
+function tempAngle(t) {
+  return DIAL.start + ((t - TEMP_MIN) / (TEMP_MAX - TEMP_MIN)) * DIAL.sweep;
+}
+function polar(angleDeg, radius = DIAL.r) {
+  const a = (angleDeg * Math.PI) / 180;
+  return [DIAL.cx + radius * Math.cos(a), DIAL.cy + radius * Math.sin(a)];
+}
+function arcPath(fromDeg, toDeg) {
+  const [x1, y1] = polar(fromDeg);
+  const [x2, y2] = polar(toDeg);
+  const large = toDeg - fromDeg > 180 ? 1 : 0;
+  return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${DIAL.r} ${DIAL.r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
 }
 
-function renderTape(setTemp) {
-  const well = $("tape");
-  const center = well.clientWidth / 2;
-  $("tapeStrip").style.transform = `translateX(${center - (setTemp - TAPE_MIN) * PX_PER_DEG}px)`;
+function buildDial() {
+  $("dialTrack").setAttribute("d", arcPath(DIAL.start, DIAL.start + DIAL.sweep));
+}
+
+function renderDial(setTemp, mode) {
+  const end = tempAngle(setTemp);
+  const arc = $("dialArc");
+  arc.setAttribute("d", arcPath(DIAL.start, Math.max(end, DIAL.start + 0.01)));
+  arc.style.stroke =
+    mode === "heat" ? "url(#heatGrad)" :
+    mode === "vent" ? "var(--ok)" : "var(--cool)";
+
+  const [hx, hy] = polar(end);
+  $("handleO").setAttribute("cx", hx); $("handleO").setAttribute("cy", hy);
+  $("handleI").setAttribute("cx", hx); $("handleI").setAttribute("cy", hy);
+
   const room = roomReading();
-  const marker = $("roomMarker");
-  if (room) {
-    marker.hidden = false;
-    // marker rides the strip: position within strip coords, offset by strip transform
-    const stripX = center - (setTemp - TAPE_MIN) * PX_PER_DEG;
-    marker.style.left = `${stripX + (room.temperature - TAPE_MIN) * PX_PER_DEG - 1.5}px`;
+  const dot = $("roomDot");
+  if (room && room.temperature >= TEMP_MIN && room.temperature <= TEMP_MAX) {
+    const [rx, ry] = polar(tempAngle(room.temperature));
+    dot.setAttribute("cx", rx); dot.setAttribute("cy", ry);
+    dot.setAttribute("visibility", "visible");
   } else {
-    marker.hidden = true;
+    dot.setAttribute("visibility", "hidden");
   }
 }
 
-function initTapeDrag() {
-  const well = $("tape");
-  let dragging = false, x0 = 0, t0 = 0, moved = false;
-  well.addEventListener("pointerdown", (e) => {
+function initDialDrag() {
+  const wrap = $("dial");
+  let dragging = false, moved = false;
+
+  const pointToTemp = (e) => {
+    const rect = wrap.getBoundingClientRect();
+    const scale = rect.width / 260;
+    const dx = (e.clientX - rect.left) / scale - DIAL.cx;
+    const dy = (e.clientY - rect.top) / scale - DIAL.cy;
+    let a = ((Math.atan2(dy, dx) * 180) / Math.PI - DIAL.start + 360) % 360;
+    if (a > DIAL.sweep) a = a > DIAL.sweep + (360 - DIAL.sweep) / 2 ? 0 : DIAL.sweep;
+    const raw = TEMP_MIN + (a / DIAL.sweep) * (TEMP_MAX - TEMP_MIN);
+    return Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(raw)));
+  };
+
+  wrap.addEventListener("pointerdown", (e) => {
     if (!state.local) return;
     dragging = true; moved = false;
-    x0 = e.clientX; t0 = state.local.info.setTemp;
-    well.classList.add("dragging");
-    well.setPointerCapture(e.pointerId);
+    wrap.classList.add("dragging");
+    wrap.setPointerCapture(e.pointerId);
     state.interacting = true;
-  });
-  well.addEventListener("pointermove", (e) => {
-    if (!dragging) return;
-    const raw = t0 - (e.clientX - x0) / PX_PER_DEG;
-    const snapped = Math.max(TEMP_MIN, Math.min(TEMP_MAX, Math.round(raw)));
-    if (snapped !== state.local.info.setTemp) {
+    const t = pointToTemp(e);
+    if (t !== state.local.info.setTemp) {
       moved = true;
-      state.local.info.setTemp = snapped;
+      state.local.info.setTemp = t;
+      renderHero();
+    }
+  });
+  wrap.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const t = pointToTemp(e);
+    if (t !== state.local.info.setTemp) {
+      moved = true;
+      state.local.info.setTemp = t;
       renderHero();
     }
   });
   const end = () => {
     if (!dragging) return;
     dragging = false;
-    well.classList.remove("dragging");
+    wrap.classList.remove("dragging");
     state.interacting = false;
     if (moved) queueSetTemp();
   };
-  well.addEventListener("pointerup", end);
-  well.addEventListener("pointercancel", end);
+  wrap.addEventListener("pointerup", end);
+  wrap.addEventListener("pointercancel", end);
 }
 
 /* ================= rendering ================= */
@@ -152,7 +179,7 @@ function renderHero() {
   const room = roomReading();
 
   $("setTemp").textContent = Math.round(info.setTemp);
-  renderTape(info.setTemp);
+  renderDial(info.setTemp, info.mode);
 
   const st = statusText(info, room);
   $("roomLine").innerHTML = room
@@ -446,7 +473,7 @@ function toast(msg, isError = false) {
 function queueSetTemp() {
   clearTimeout(state.tempTimer);
   state.tempTimer = setTimeout(() => {
-    sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("tape"));
+    sendChange({ info: { setTemp: Math.round(state.local.info.setTemp) } }, $("dial"));
   }, 600);
 }
 
@@ -502,9 +529,9 @@ function nudge(delta) {
 
 function init() {
   initTheme();
-  buildTape();
+  buildDial();
   buildControls();
-  initTapeDrag();
+  initDialDrag();
   fetchState();
   fetchToday();
   setInterval(() => {
@@ -512,7 +539,6 @@ function init() {
   }, POLL_MS);
   setInterval(fetchToday, 5 * 60 * 1000);
   setInterval(renderFoot, 5000);
-  window.addEventListener("resize", () => state.local && renderTape(state.local.info.setTemp));
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) fetchState(true);
   });
