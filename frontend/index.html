@@ -23,6 +23,11 @@
     <div class="hdr-right">
       <span id="badges"></span>
       <span class="chip-sm" id="outdoorChip" hidden></span>
+      <button class="theme-btn" id="actBtn" aria-label="Activity log">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="8.5"/><path d="M12 8v4l2.6 2.6"/>
+        </svg>
+      </button>
       <button class="theme-btn" id="themeBtn" aria-label="Toggle theme">&#9681;</button>
     </div>
   </header>
@@ -115,6 +120,34 @@
   <!-- 7 · footer -->
   <footer class="foot" id="footInfo"></footer>
 
+</div>
+
+<!-- activity sheet: the flight recorder -->
+<div class="sheet" id="actSheet" aria-hidden="true" role="dialog" aria-label="Activity log">
+  <div class="sheet-inner">
+    <header class="sheet-hdr">
+      <div>
+        <div class="sheet-title">Activity</div>
+        <div class="sheet-sub">everything that moved, and who moved it</div>
+      </div>
+      <button class="theme-btn sheet-close" id="actClose" aria-label="Close activity">&#10005;</button>
+    </header>
+    <div class="act-filters" id="actFilters">
+      <button class="chip-btn active" data-src="">all</button>
+      <button class="chip-btn" data-src="you">you</button>
+      <button class="chip-btn" data-src="auto">auto</button>
+      <button class="chip-btn" data-src="wall,system">wall &amp; system</button>
+    </div>
+    <div class="act-scroll" id="actScroll">
+      <button class="act-new" id="actNew" hidden>&#8593; new activity</button>
+      <div id="actList"></div>
+      <div class="act-more" id="actMore" hidden>&#8230;</div>
+      <div class="act-empty" id="actEmpty" hidden>
+        <div class="act-empty-glyph">&#9678;</div>
+        Nothing recorded yet.<br>The flight recorder starts with the next change.
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast" role="status"></div>

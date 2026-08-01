@@ -11,6 +11,7 @@ Everything below is defined in `backend/main.py`.
 - [`POST /api/aircon`](#post-apiaircon)
 - [`POST /api/auto`](#post-apiauto)
 - [`GET /api/auto/log`](#get-apiautolog)
+- [`GET /api/activity`](#get-apiactivity)
 - [`GET /api/history`](#get-apihistory)
 - [`GET /api/temps`](#get-apitemps)
 - [`GET /api/today`](#get-apitoday)
@@ -259,6 +260,39 @@ The autopilot audit trail, newest first.
     {"ts": 1754087520, "action": "decide", "reason": "z01: calling (room 19.4°, target 21.5°)"},
     {"ts": 1754086920, "action": "config", "reason": "z01: enabled=True target=21.5"}
   ]
+}
+```
+
+---
+
+## `GET /api/activity`
+
+The unified activity feed behind the app's Activity sheet: every change to the
+system, newest first, attributed to whoever made it. Structured — the client
+composes the sentences.
+
+| Query | Type | Default | Notes |
+|-------|------|---------|-------|
+| `limit` | int | `60` | 1–200; the response's `more` says whether older entries exist |
+| `before` | float | — | page backwards: return entries strictly older than this `ts` |
+| `sources` | str | — | comma-separated filter, e.g. `sources=you,auto` |
+
+| `source` | Meaning |
+|----------|---------|
+| `you` | a write made through this app |
+| `auto` | an autopilot decision or write (`calling`, `satisfied`, `suspended`, `resumed`, `drive`, `park`, `handback`, `power`, `zone`, `blocked`, `error`) |
+| `wall` | a change observed on the tablet that no app write explains — wall panel, vendor app, scenes, AA cloud (detected by diffing consecutive polls against in-flight intents) |
+| `system` | app plumbing: `queued`, `delivered`, `offline`, `online`, `timerDone` |
+
+```json
+{
+  "entries": [
+    {"ts": 1754087520.2, "source": "auto", "kind": "calling",
+     "detail": {"zid": "z02", "name": "Upstairs", "room": 19.6, "target": 20.0}},
+    {"ts": 1754087340.7, "source": "wall", "kind": "setTemp", "detail": {"value": 24.0}},
+    {"ts": 1754087100.1, "source": "you", "kind": "power", "detail": {"state": "on"}}
+  ],
+  "more": true
 }
 ```
 

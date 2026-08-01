@@ -54,6 +54,10 @@ Most of this codebase is a response to those four facts.
   drives every sensor-equipped zone toward it — hysteresis, anti-short-cycle
   timers, a decoupled drive/park unit setpoint, damper strategy, fail-safes, and
   an audit log of every decision. Sensorless zones stay manual.
+- **Activity feed** — a flight recorder for the whole system: a mobile-first
+  timeline of every change and who made it — you, the autopilot, or the wall
+  panel/vendor app (unexplained tablet-side changes are detected and attributed),
+  plus queue deliveries and tablet outages. Filterable, infinite-scroll, live.
 - **History and maintenance** — SQLite snapshots every poll, a 24-hour per-zone
   temperature chart, today's runtime by hour and by mode, tablet-reachability
   statistics, and a filter-hours counter you reset when you clean the filter.

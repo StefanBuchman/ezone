@@ -846,10 +846,201 @@ function nudge(direction) {
   commitDial();
 }
 
+/* ================= activity sheet · the flight recorder ================= */
+
+const ACT = { open: false, entries: [], more: false, loading: false, filter: "", newest: 0, poll: null };
+
+const ACT_GLYPHS = {
+  power: "M12 4v8M17.2 7.2a7.4 7.4 0 1 1-10.4 0",
+  setTemp: "M10 5a2 2 0 0 1 4 0v8.2a4 4 0 1 1-4 0z",
+  target: "M10 5a2 2 0 0 1 4 0v8.2a4 4 0 1 1-4 0z",
+  drive: "M12 19V6M6.5 11.5L12 6l5.5 5.5",
+  park: "M9 5.5v13M15 5.5v13",
+  handback: "M9 14l-4-4 4-4M5 10h9a5 5 0 0 1 0 10h-3",
+  mode: "M12 3.5c.4 2.4 1.9 3.7 3.1 5.1 1.2 1.4 2.2 2.8 2.2 4.8a5.3 5.3 0 1 1-10.6 0c0-1.5.6-2.7 1.4-3.8.2 1 .8 1.8 1.6 2.2-.4-2.2.4-5.7 2.3-8.3z",
+  fan: "M4 8.5h9.7a2.9 2.9 0 1 0-2.9-2.9M4 13h13.7a3.1 3.1 0 1 1-3.1 3.1M4 17.5h6.5",
+  timer: "M12 8v4.5l2.8 2.8M12 21a8.5 8.5 0 1 1 0-17 8.5 8.5 0 0 1 0 17z",
+  timerOn: "M12 8v4.5l2.8 2.8M12 21a8.5 8.5 0 1 1 0-17 8.5 8.5 0 0 1 0 17z",
+  timerDone: "M12 8v4.5l2.8 2.8M12 21a8.5 8.5 0 1 1 0-17 8.5 8.5 0 0 1 0 17z",
+  zone: "M4 7h16M4 12h10M4 17h13",
+  calling: "M6 16l6-8 6 8",
+  satisfied: "M5 12.5l4.5 4.5L19 7.5",
+  suspended: "M12 5v9M12 18v.5",
+  resumed: "M5 12.5l4.5 4.5L19 7.5",
+  autoMode: "M12 3.5l1.9 5.4 5.6 1.6-5.6 1.6L12 17.5l-1.9-5.4-5.6-1.6 5.6-1.6z",
+  queued: "M3.5 13.5h4.6l2 3h3.8l2-3h4.6M5 6.5h14l1.5 7v5h-17v-5z",
+  delivered: "M3.5 11.5L20.5 4l-7 17-2.6-7.4z",
+  offline: "M4 4l16 16M8.5 15.5a5 5 0 0 1 5.2-1.2M5 12a10 10 0 0 1 3.6-2.4M15.5 8.6A10 10 0 0 1 19 12",
+  online: "M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0M12 19h.01",
+  blocked: "M12 4l9.5 16.5h-19zM12 10.5v4M12 17.5v.01",
+  error: "M12 4l9.5 16.5h-19zM12 10.5v4M12 17.5v.01",
+};
+
+const ACT_BY = { you: "you", auto: "autopilot", wall: "wall panel / vendor app", system: "system" };
+
+function actText(e) {
+  const d = e.detail || {};
+  const by = ACT_BY[e.source];
+  switch (e.kind) {
+    case "power": return [`System ${d.state === "on" ? "on" : "off"}`, by];
+    case "setTemp": return [`Set to ${fmtTemp(d.value)}&deg;`, by];
+    case "target": return [`Target ${fmtTemp(d.value)}&deg;`, by];
+    case "autoMode": return [d.enabled ? "Auto engaged" : "Auto off", by];
+    case "drive": return ["Driving the unit", `setpoint pinned at ${fmtTemp(d.value)}&deg;`];
+    case "park": return ["Unit parked idle", `setpoint out of the way at ${fmtTemp(d.value)}&deg;`];
+    case "handback": return [`Setpoint handed back &middot; ${fmtTemp(d.value)}&deg;`, "auto disengaged"];
+    case "mode": return [`Mode &rarr; ${esc(String(d.value))}`, by];
+    case "fan": return [`Fan &rarr; ${esc(String(d.value))}`, by];
+    case "timer": return [d.minutes ? `Timer set &middot; ${fmtMins(d.minutes)}` : "Timer cleared", by];
+    case "timerOn": return [d.minutes ? `On-timer set &middot; ${fmtMins(d.minutes)}` : "On-timer cleared", by];
+    case "timerDone": return ["Timer finished &mdash; system off", null];
+    case "zone": {
+      const bits = [];
+      if (d.state) bits.push(d.state === "open" ? "opened" : "closed");
+      if (d.value != null) bits.push(`damper ${d.value}%`);
+      return [`${esc(d.name)} ${bits.join(" &middot; ") || "changed"}`, by];
+    }
+    case "calling": return [`${esc(d.name)} calling`, `${fmtTemp(d.room)}&deg; &rarr; target ${fmtTemp(d.target)}&deg;`];
+    case "satisfied": return [`${esc(d.name)} at temperature`, `holding &middot; room ${fmtTemp(d.room)}&deg;`];
+    case "suspended": return [`${esc(d.name)} auto suspended`, esc(String(d.reason || ""))];
+    case "resumed": return [`${esc(d.name)} auto resumed`, null];
+    case "queued": return ["Change queued", "tablet asleep &mdash; will deliver"];
+    case "delivered": return ["Queued changes delivered", null];
+    case "offline": return ["Tablet unreachable", null];
+    case "online": return ["Tablet back online", d.downSeconds > 90 ? `gone ${fmtMins(Math.round(d.downSeconds / 60))}` : null];
+    case "blocked": return ["Auto change blocked", esc(String(d.detail || ""))];
+    case "error": return ["Write failed", esc(String(d.detail || ""))];
+    default: return [esc(e.kind), null];
+  }
+}
+
+function actDay(ts) {
+  const d = new Date(ts * 1000), now = new Date();
+  const days = Math.round(
+    (new Date(now.getFullYear(), now.getMonth(), now.getDate()) -
+     new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5
+  );
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+}
+
+function actTime(ts) {
+  return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/* runs of the same actor doing the same thing collapse to the latest */
+function actCoalesce(entries) {
+  const out = [];
+  for (const e of entries) {
+    const key = `${e.source}|${e.kind}|${(e.detail || {}).zid || ""}`;
+    const last = out[out.length - 1];
+    if (last && last.key === key && ["setTemp", "target", "zone", "drive", "park"].includes(e.kind)) {
+      last.count += 1;
+    } else {
+      out.push({ key, e, count: 1 });
+    }
+  }
+  return out;
+}
+
+function renderActivity(animate) {
+  const groups = actCoalesce(ACT.entries);
+  let html = "", day = "", i = 0;
+  for (const g of groups) {
+    const d = actDay(g.e.ts);
+    if (d !== day) { day = d; html += `<div class="act-day">${d}</div>`; }
+    const [line, sub] = actText(g.e);
+    const anim = animate && i < 14 ? ` anim" style="animation-delay:${i * 26}ms` : "";
+    html += `<div class="act-row${anim}" data-src="${g.e.source}">
+      <span class="act-time">${actTime(g.e.ts)}</span>
+      <span class="act-glyph"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ACT_GLYPHS[g.e.kind] || ACT_GLYPHS.zone}"/></svg></span>
+      <span class="act-main"><div class="act-line">${line}</div>${sub ? `<div class="act-sub">${sub}</div>` : ""}</span>
+      ${g.count > 1 ? `<span class="act-count">&times;${g.count}</span>` : ""}
+    </div>`;
+    i += 1;
+  }
+  $("actList").innerHTML = html;
+  $("actEmpty").hidden = ACT.entries.length > 0;
+}
+
+async function fetchActivity(reset) {
+  if (ACT.loading) return;
+  ACT.loading = true;
+  $("actMore").hidden = false;
+  try {
+    const before = reset || !ACT.entries.length ? 0 : ACT.entries[ACT.entries.length - 1].ts;
+    const url = `/api/activity?limit=60${before ? `&before=${before}` : ""}${ACT.filter ? `&sources=${ACT.filter}` : ""}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(res.statusText);
+    const data = await res.json();
+    ACT.entries = reset ? data.entries : ACT.entries.concat(data.entries);
+    ACT.more = data.more;
+    if (ACT.entries.length) ACT.newest = Math.max(ACT.newest, ACT.entries[0].ts);
+    renderActivity(reset);
+    if (reset) $("actScroll").scrollTop = 0;
+    $("actNew").hidden = true;
+  } catch (err) {
+    toast(`Couldn't load activity: ${err.message}`, true);
+  } finally {
+    ACT.loading = false;
+    $("actMore").hidden = !ACT.more;
+  }
+}
+
+async function checkNewActivity() {
+  try {
+    const res = await fetch(`/api/activity?limit=1${ACT.filter ? `&sources=${ACT.filter}` : ""}`);
+    const data = await res.json();
+    if (data.entries.length && data.entries[0].ts > ACT.newest) $("actNew").hidden = false;
+  } catch { /* quiet */ }
+}
+
+function openActivity() {
+  if (ACT.open) return;
+  ACT.open = true;
+  $("actSheet").classList.add("open");
+  $("actSheet").setAttribute("aria-hidden", "false");
+  document.body.classList.add("no-scroll");
+  history.pushState({ act: 1 }, "");
+  fetchActivity(true);
+  ACT.poll = setInterval(checkNewActivity, 25000);
+}
+
+function closeActivity(fromPop) {
+  if (!ACT.open) return;
+  ACT.open = false;
+  $("actSheet").classList.remove("open");
+  $("actSheet").setAttribute("aria-hidden", "true");
+  document.body.classList.remove("no-scroll");
+  clearInterval(ACT.poll);
+  if (!fromPop && history.state && history.state.act) history.back();
+}
+
+function initActivity() {
+  $("actBtn").addEventListener("click", openActivity);
+  $("actClose").addEventListener("click", () => closeActivity(false));
+  $("actNew").addEventListener("click", () => fetchActivity(true));
+  window.addEventListener("popstate", () => closeActivity(true));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeActivity(false); });
+  $("actFilters").addEventListener("click", (e) => {
+    const btn = e.target.closest(".chip-btn");
+    if (!btn) return;
+    ACT.filter = btn.dataset.src;
+    document.querySelectorAll("#actFilters .chip-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    fetchActivity(true);
+  });
+  $("actScroll").addEventListener("scroll", () => {
+    const el = $("actScroll");
+    if (ACT.more && !ACT.loading && el.scrollTop + el.clientHeight > el.scrollHeight - 240) fetchActivity(false);
+  });
+}
+
 function init() {
   initTheme();
   buildDial();
   buildControls();
+  initActivity();
   initDialLock();
   initDialDrag();
   $("filterBtn").addEventListener("click", async () => {

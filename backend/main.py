@@ -25,6 +25,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import activity
 from .autopilot import Autopilot
 from .ezone import EzoneClient, EzoneError, _deep_merge
 from .sensors import SensorFeed
@@ -70,6 +71,7 @@ log = logging.getLogger("uvicorn.error")
 pending: dict | None = None
 pending_at: float = 0.0
 PENDING_PATH = None  # set at startup, lives in DATA_DIR
+offline_since: float = 0.0  # when the current tablet outage began (0 = none)
 
 # Intent overlay: the tablet takes several seconds to apply a delivered write
 # to its own reported state. Each accepted write is remembered here and wins
@@ -144,11 +146,14 @@ def _save_pending() -> None:
 
 def _queue_change(ac_change: dict) -> None:
     global pending, pending_at
+    first = pending is None
     if pending is None:
         pending = {}
         pending_at = time.time()
     _deep_merge(pending, ac_change)
     _save_pending()
+    if first:
+        _activity("system", [("queued", {})])
 
 
 def _effective_data() -> dict | None:
@@ -180,6 +185,10 @@ def _init_db() -> sqlite3.Connection:
             zones TEXT, error_code TEXT, filter_status INTEGER
         )"""
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS activity (ts REAL, source TEXT, kind TEXT, detail TEXT)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity (ts)")
     conn.commit()
     return conn
 
@@ -212,17 +221,62 @@ def _record_snapshot(data: dict) -> None:
         db.commit()
 
 
+def _activity(source: str, events: list) -> None:
+    try:
+        activity.record(db, db_lock, source, events)
+    except Exception:  # noqa: BLE001 — the feed must never break control flow
+        log.warning("activity write failed: %s %s", source, events)
+
+
+def _zone_names() -> dict:
+    if cache.data is None:
+        return {}
+    return {zid: z.get("name", zid) for zid, z in cache.data["aircons"]["ac1"]["zones"].items()}
+
+
+def _explained_intents() -> set:
+    """(path, value) for every in-flight write of ours, so observed changes
+    they caused aren't blamed on the wall panel."""
+    out = set()
+    for e in recent:
+        out.add((tuple(e["path"]), activity._norm(e["value"])))
+    for path, value in _flatten_change(pending or {}):
+        out.add((path, activity._norm(value)))
+    return out
+
+
+def _log_external(prev_data, was_ok: bool, explained: set) -> None:
+    """Narrate observed changes nobody in this app asked for."""
+    global offline_since
+    by_src: dict[str, list] = {}
+    if not was_ok and offline_since:
+        by_src.setdefault("system", []).append(
+            ("online", {"downSeconds": round(time.time() - offline_since)})
+        )
+        offline_since = 0.0
+    prev_ac = prev_data["aircons"]["ac1"] if prev_data else {}
+    new_ac = cache.data["aircons"]["ac1"] if cache.data else {}
+    for kind, detail, src in activity.diff_external(prev_ac, new_ac, explained):
+        by_src.setdefault(src, []).append((kind, detail))
+    for src, events in by_src.items():
+        _activity(src, events)
+
+
 def _last_state_path() -> Path:
     return DATA_DIR / "last_state.json"
 
 
 async def _refresh() -> None:
+    global offline_since
+    was_ok, prev_data = cache.ok, cache.data
     try:
         data = await client.get_system_data()
         cache.data = data
         cache.fetched_at = time.time()
         cache.ok = True
         cache.error = ""
+        explained = _explained_intents()
+        await asyncio.to_thread(_log_external, prev_data, was_ok, explained)
         _prune_recent()
         await asyncio.to_thread(_record_snapshot, data)
         await asyncio.to_thread(
@@ -231,6 +285,9 @@ async def _refresh() -> None:
     except EzoneError as exc:
         cache.ok = False
         cache.error = str(exc)
+        if was_ok:
+            offline_since = time.time()
+            await asyncio.to_thread(_activity, "system", [("offline", {})])
         await asyncio.to_thread(_record_offline)
 
 
@@ -378,10 +435,31 @@ async def _auto_tick() -> None:
     readings = {
         zid: feed.reading_for_zone(zid, z["name"]) for zid, z in ac["zones"].items()
     }
+    cfg = _pilot_cfg()
+    prev_calling, prev_susp = dict(pilot.calling), dict(pilot.suspended)
     before = (pilot.owns_power, pilot.last_on, pilot.last_off)
-    change, logs = pilot.tick(_pilot_cfg(), ac, readings, _active_overrides(), time.time())
+    change, logs = pilot.tick(cfg, ac, readings, _active_overrides(), time.time())
     if (pilot.owns_power, pilot.last_on, pilot.last_off) != before:
         await asyncio.to_thread(_save_auto)
+    names = _zone_names()
+    acts = []
+    for zid in cfg:
+        s_now, s_was = pilot.suspended.get(zid), prev_susp.get(zid)
+        if s_now != s_was:
+            acts.append((
+                "suspended" if s_now else "resumed",
+                {"zid": zid, "name": names.get(zid, zid), "reason": s_now},
+            ))
+        c_now, c_was = pilot.calling.get(zid, False), prev_calling.get(zid, False)
+        if c_now != c_was:
+            r = readings.get(zid) or {}
+            acts.append((
+                "calling" if c_now else "satisfied",
+                {"zid": zid, "name": names.get(zid, zid),
+                 "room": r.get("temperature"), "target": cfg[zid]["target"]},
+            ))
+    if acts:
+        await asyncio.to_thread(_activity, "auto", acts)
     for line in logs:
         await asyncio.to_thread(_auto_log, "decide", line)
     if not change:
@@ -390,11 +468,15 @@ async def _auto_tick() -> None:
         payload = _validate_change(AirconChange(**change))
     except HTTPException as exc:
         await asyncio.to_thread(_auto_log, "blocked", f"{change} -> {exc.detail}")
+        await asyncio.to_thread(_activity, "auto", [("blocked", {"detail": str(exc.detail)})])
         return
     try:
         await client.set_aircon(payload)
         _note_recent(payload["ac1"])
         await asyncio.to_thread(_auto_log, "apply", json.dumps(change))
+        await asyncio.to_thread(
+            _activity, "auto", activity.events_from_change(payload["ac1"], names, auto=True)
+        )
         await _refresh()
     except EzoneError as exc:
         await asyncio.to_thread(_auto_log, "error", str(exc))
@@ -462,6 +544,7 @@ async def _deliver_loop() -> None:
             _note_recent(delivered)  # hold the display until the tablet confirms
             pending = None
             _save_pending()
+            await asyncio.to_thread(_activity, "system", [("delivered", {})])
             await _refresh()
         except EzoneError:
             pass  # still asleep; try again next round
@@ -623,6 +706,9 @@ async def set_aircon(change: AirconChange):
         await _refresh()
     payload = _validate_change(change)
     _mark_overrides(payload["ac1"])  # manual wins: auto stands down on these scopes
+    await asyncio.to_thread(
+        _activity, "you", activity.events_from_change(payload["ac1"], _zone_names())
+    )
 
     # If the tablet is known to be asleep, don't make the user wait through
     # a doomed retry cycle — queue immediately.
@@ -747,6 +833,16 @@ async def set_auto(change: AutoChange):
                     _auto_log, "handback",
                     f"setTemp -> {payload['ac1']['info']['setTemp']}",
                 )
+                await asyncio.to_thread(
+                    _activity, "auto",
+                    [("handback", {"value": payload["ac1"]["info"]["setTemp"]})],
+                )
+    acts = []
+    if change.enabled is not None:
+        acts.append(("autoMode", {"enabled": auto_cfg["enabled"]}))
+    if change.target is not None:
+        acts.append(("target", {"value": auto_cfg["target"]}))
+    await asyncio.to_thread(_activity, "you", acts)
     _save_auto()
     await asyncio.to_thread(
         _auto_log, "config",
@@ -762,6 +858,37 @@ async def auto_log(limit: int = Query(50, ge=1, le=500)):
             "SELECT ts, action, reason FROM auto_log ORDER BY ts DESC LIMIT ?", (limit,)
         ).fetchall()
     return {"entries": [{"ts": r[0], "action": r[1], "reason": r[2]} for r in rows]}
+
+
+@app.get("/api/activity")
+async def get_activity(
+    before: float = Query(0),
+    limit: int = Query(60, ge=1, le=200),
+    sources: str = Query(""),
+):
+    """Unified activity feed, newest first. `before` pages backwards."""
+    conds, args = [], []
+    if before:
+        conds.append("ts < ?")
+        args.append(before)
+    src = [s for s in sources.split(",") if s]
+    if src:
+        conds.append(f"source IN ({','.join('?' * len(src))})")
+        args.extend(src)
+    q = "SELECT ts, source, kind, detail FROM activity"
+    if conds:
+        q += " WHERE " + " AND ".join(conds)
+    q += " ORDER BY ts DESC, rowid DESC LIMIT ?"
+    args.append(limit + 1)
+    with db_lock:
+        rows = db.execute(q, args).fetchall()
+    return {
+        "entries": [
+            {"ts": r[0], "source": r[1], "kind": r[2], "detail": json.loads(r[3])}
+            for r in rows[:limit]
+        ],
+        "more": len(rows) > limit,
+    }
 
 
 @app.get("/api/temps")
