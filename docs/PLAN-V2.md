@@ -101,6 +101,8 @@ read and set it.
       (HA/Pi retired — removed 2026-08-02).
 - [ ] Later candidates: per-room sensors (room-weighted control), window
       sensors, occupancy auto-off via UniFi.
+- Maintenance & component health dashboard: now planned in detail in
+  [PLAN-V3-MAINTENANCE.md](PLAN-V3-MAINTENANCE.md).
 
 ## Risks & notes
 
