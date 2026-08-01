@@ -97,8 +97,8 @@ read and set it.
 - [ ] Buy 1× Sonoff SNZB-02P/02D for Upstairs (~$20) → full-house closed loop.
 - [ ] Buy a Moes/Tuya Zigbee wall thermostat — used as a physical target
       dial + display mapped to a zone target over MQTT (its relay unused).
-- [ ] Remove the stale `ha.buchman.org` service from the host compose
-      (HA/Pi retired).
+- [x] Remove the stale `ha.buchman.org` service from the host compose
+      (HA/Pi retired — removed 2026-08-02).
 - [ ] Later candidates: per-room sensors (room-weighted control), window
       sensors, occupancy auto-off via UniFi.
 
