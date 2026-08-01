@@ -22,12 +22,19 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .ezone import EzoneClient, EzoneError, _deep_merge
+from .sensors import SensorFeed
 
 EZONE_HOST = os.environ.get("EZONE_HOST", "10.160.1.180")
 EZONE_PORT = int(os.environ.get("EZONE_PORT", "2025"))
 EZONE_MOCK = os.environ.get("EZONE_MOCK", "0") == "1"
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "30"))
 DATA_DIR = Path(os.environ.get("DATA_DIR", "./data"))
+MQTT_URL = os.environ.get("MQTT_URL", "")
+SENSOR_MAP = dict(
+    pair.split("=", 1)
+    for pair in os.environ.get("SENSOR_MAP", "").split(",")
+    if "=" in pair
+)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -47,6 +54,7 @@ class Cache:
 cache = Cache()
 client: EzoneClient | None = None
 db: sqlite3.Connection | None = None
+feed: SensorFeed | None = None
 
 # Store-and-forward queue: the tablet sleeps its Wi-Fi, so changes made while
 # it's unreachable are held as one merged pending diff and delivered as soon
@@ -107,10 +115,15 @@ def _init_db() -> sqlite3.Connection:
 
 def _record_snapshot(data: dict) -> None:
     info = data["aircons"]["ac1"]["info"]
-    zones = {
-        zid: {"state": z["state"], "value": z["value"], "measuredTemp": z["measuredTemp"]}
-        for zid, z in data["aircons"]["ac1"]["zones"].items()
-    }
+    zones = {}
+    for zid, z in data["aircons"]["ac1"]["zones"].items():
+        reading = feed.reading_for_zone(zid, z["name"]) if feed else None
+        zones[zid] = {
+            "state": z["state"],
+            "value": z["value"],
+            "measuredTemp": reading["temperature"] if reading and not reading["stale"] else None,
+            "humidity": reading["humidity"] if reading and not reading["stale"] else None,
+        }
     db.execute(
         "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
         (
@@ -195,18 +208,23 @@ async def _deliver_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global client, db, PENDING_PATH
+    global client, db, PENDING_PATH, feed
     client = EzoneClient(EZONE_HOST, EZONE_PORT, mock=EZONE_MOCK)
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     PENDING_PATH = DATA_DIR / "pending.json"
     _load_pending()
     _load_last_state()
     db = _init_db()
-    poll_task = asyncio.create_task(_poll_loop())
-    deliver_task = asyncio.create_task(_deliver_loop())
+    tasks = [
+        asyncio.create_task(_poll_loop()),
+        asyncio.create_task(_deliver_loop()),
+    ]
+    if MQTT_URL:
+        feed = SensorFeed(MQTT_URL, SENSOR_MAP)
+        tasks.append(asyncio.create_task(feed.run()))
     yield
-    poll_task.cancel()
-    deliver_task.cancel()
+    for task in tasks:
+        task.cancel()
     await client.aclose()
     db.close()
 
@@ -215,14 +233,23 @@ app = FastAPI(title="e-zone", lifespan=lifespan)
 
 
 def _state_payload() -> dict:
+    data = _effective_data()
+    if data and feed:
+        for zid, zone in data["aircons"]["ac1"]["zones"].items():
+            reading = feed.reading_for_zone(zid, zone["name"])
+            if reading:
+                zone["sensor"] = reading
+                if not reading["stale"] and reading["temperature"] is not None:
+                    zone["measuredTemp"] = reading["temperature"]
     return {
         "ok": cache.ok,
         "ageSeconds": round(time.time() - cache.fetched_at, 1) if cache.data else None,
         "error": cache.error,
         "mock": EZONE_MOCK,
+        "mqtt": feed.connected if feed else None,
         "pending": pending is not None,
         "pendingAgeSeconds": round(time.time() - pending_at, 1) if pending else None,
-        "data": _effective_data(),
+        "data": data,
     }
 
 
@@ -364,6 +391,8 @@ async def health():
         "ezone": cache.ok,
         "mock": EZONE_MOCK,
         "error": cache.error,
+        "mqtt": feed.connected if feed else None,
+        "sensors": {name: round(time.time() - r["ts"]) for name, r in feed.readings.items()} if feed else {},
         "tabletUptime24h": round(100 * (1 - offline / total), 1) if total else None,
     }
 

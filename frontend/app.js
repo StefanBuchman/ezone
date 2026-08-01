@@ -154,6 +154,7 @@ function renderZones(ac, on) {
           <div class="zone-name"></div>
           <div class="zone-sub"></div>
         </div>
+        <div class="zone-temp"></div>
         <button class="switch" role="switch" aria-label="zone open"></button>
         <div class="zone-slider-row">
           <input type="range" min="5" max="100" step="5" aria-label="damper percentage">
@@ -181,6 +182,19 @@ function renderZones(ac, on) {
     const isOpen = z.state === "open";
     card.classList.toggle("open", isOpen && on);
     card.querySelector(".zone-name").textContent = z.name;
+
+    const tempEl = card.querySelector(".zone-temp");
+    const s = z.sensor;
+    if (s && s.temperature != null) {
+      tempEl.classList.toggle("stale", !!s.stale);
+      tempEl.innerHTML =
+        `<span class="t">${Number(s.temperature).toFixed(1)}&deg;</span>` +
+        `<span class="rh">${s.stale
+          ? `stale ${fmtDur(Math.max(1, Math.round(s.ageSeconds / 60)))}`
+          : `${Math.round(Number(s.humidity))}% rh${Number(s.battery) <= 20 ? " · batt!" : ""}`}</span>`;
+    } else {
+      tempEl.innerHTML = `<span class="rh">no sensor</span>`;
+    }
     card.querySelector(".zone-sub").innerHTML = isOpen
       ? `damper <span class="pct">${Number(z.value)}%</span>`
       : "closed";
@@ -243,6 +257,7 @@ function renderBadges(info) {
   const badges = [];
   if (state.remote?.mock) badges.push('<span class="badge warn">mock</span>');
   if (state.remote?.pending) badges.push('<span class="badge warn">queued</span>');
+  if (state.remote?.mqtt === false) badges.push('<span class="badge warn">sensors offline</span>');
   if (info.filterCleanStatus) badges.push('<span class="badge warn">filter due</span>');
   if (info.airconErrorCode) badges.push(`<span class="badge bad">err ${esc(info.airconErrorCode)}</span>`);
   $("topBadges").innerHTML = badges.join("");
