@@ -10,6 +10,7 @@ services:
       EZONE_HOST: 10.160.1.180
       EZONE_PORT: "2025"
       POLL_SECONDS: "30"
+      MQTT_URL: mqtt://mosquitto:1883
     volumes:
       - ezone-data:/data
 

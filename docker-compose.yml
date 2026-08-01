@@ -9,6 +9,10 @@ services:
       EZONE_HOST: 10.160.1.180   # the e-zone touchscreen
       EZONE_PORT: "2025"
       POLL_SECONDS: "30"
+      # Zigbee sensor feed. "mqtt://mosquitto:1883" works when the broker runs
+      # in the same compose project; use the host IP (e.g. mqtt://10.160.1.251:1883)
+      # if ezone is deployed as its own stack. Set to "" to disable.
+      MQTT_URL: mqtt://mosquitto:1883
       # EZONE_MOCK: "1"          # uncomment to run against a simulated tablet
     volumes:
       - ezone-data:/data
