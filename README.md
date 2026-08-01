@@ -52,8 +52,8 @@ Most of this codebase is a response to those four facts.
 - **Autopilot** — one Auto button, one target: when engaged, the dial sets the
   temperature the house holds (0.5° steps) and a 60-second closed-loop controller
   drives every sensor-equipped zone toward it — hysteresis, anti-short-cycle
-  timers, setpoint bias, damper strategy, fail-safes, and an audit log of every
-  decision. Sensorless zones stay manual.
+  timers, a decoupled drive/park unit setpoint, damper strategy, fail-safes, and
+  an audit log of every decision. Sensorless zones stay manual.
 - **History and maintenance** — SQLite snapshots every poll, a 24-hour per-zone
   temperature chart, today's runtime by hour and by mode, tablet-reachability
   statistics, and a filter-hours counter you reset when you clean the filter.

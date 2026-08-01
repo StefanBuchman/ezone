@@ -8,8 +8,11 @@ audit trail of why.
 Principles (see docs/PLAN-V2.md):
 - hysteresis band around the target so dampers and the compressor never chatter
 - anti-short-cycle: minimum run and minimum off times for the unit
-- setpoint bias: the unit's own return-air loop must never satisfy before
-  the room sensor does
+- setpoint decoupled: while auto runs, the unit's setTemp is not a user
+  temperature — it is a binary actuator. Driven far past any reachable
+  return-air temp while zones call (so the unit's own return-air loop can
+  never satisfy before the room sensor does), parked out of the way when
+  demand stops (so even a unit auto doesn't own stops delivering)
 - manual always wins: user-touched scopes are off-limits for an hour
 - fail safe: stale sensors suspend the zone; auto only powers off what
   auto powered on
@@ -18,14 +21,18 @@ Principles (see docs/PLAN-V2.md):
 from __future__ import annotations
 
 HYSTERESIS = 0.3          # degrees either side of target
-SETPOINT_BIAS = 2         # push the unit's own setpoint past the room target
+# Return air runs well above the room sensor (observed live: satisfied at
+# setTemp 22 with the room at 19.6), so a relative target+2 bias let the
+# unit quit early. Drive values sit past any reachable return-air temp;
+# park values put the unit's own thermostat where it stops delivering.
+SET_DRIVE_HEAT, SET_PARK_HEAT = 28, 16
+SET_DRIVE_COOL, SET_PARK_COOL = 18, 32
 MIN_RUN_S = 600           # compressor minimum on time
 MIN_OFF_S = 300           # compressor minimum off time
 STALE_S = 600             # sensor readings older than this suspend the zone
 OVERTEMP_HEAT = 28.0      # absolute bound: force off above this in heat
 UNDERTEMP_COOL = 14.0     # absolute bound: force off below this in cool
 DAMPER_MIN = 30           # never drive an open auto zone below this
-TEMP_MIN, TEMP_MAX = 16, 32
 
 
 def _damper_for(error: float) -> int:
@@ -129,6 +136,13 @@ class Autopilot:
                     self.owns_power = False
                     logs.append("all auto zones suspended: turning unit off")
                     return {"info": {"state": "off"}}, logs
+            # can't (or won't) power off — at least park the setpoint so a
+            # unit auto doesn't own stops delivering on stale/bounded sensors
+            if unit_on and (heat or cool) and "setTemp" not in overrides:
+                park = SET_PARK_HEAT if heat else SET_PARK_COOL
+                if park != round(info["setTemp"]):
+                    logs.append("all auto zones suspended: parking setpoint")
+                    return {"info": {"setTemp": park}}, logs
             return None, logs
 
         change_info: dict = {}
@@ -152,14 +166,14 @@ class Autopilot:
 
         unit_will_run = change_info.get("state", "on" if unit_on else "off") == "on"
 
-        # ---- unit setpoint bias ----
-        if unit_will_run and any_call and "setTemp" not in overrides:
-            targets = [enabled[z]["target"] for z in active if self.calling.get(z)]
-            if targets:
-                want = (max(targets) + SETPOINT_BIAS) if heat else (min(targets) - SETPOINT_BIAS)
-                want = max(TEMP_MIN, min(TEMP_MAX, round(want)))
-                if want != round(info["setTemp"]):
-                    change_info["setTemp"] = want
+        # ---- unit setpoint: drive/park actuator (decoupled from targets) ----
+        if unit_will_run and "setTemp" not in overrides:
+            if any_call:
+                want = SET_DRIVE_HEAT if heat else SET_DRIVE_COOL
+            else:
+                want = SET_PARK_HEAT if heat else SET_PARK_COOL
+            if want != round(info["setTemp"]):
+                change_info["setTemp"] = want
 
         # ---- dampers ----
         zones = ac["zones"]

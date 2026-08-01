@@ -295,7 +295,8 @@ touching the control law.
 | Constant | Value | Why |
 |----------|-------|-----|
 | `HYSTERESIS` | ±0.3 °C | a deadband around target; without it dampers and the compressor chatter around the setpoint |
-| `SETPOINT_BIAS` | 2 °C | the unit's own return-air thermostat must never satisfy before the room does, so its setpoint is driven 2 ° past the room target |
+| `SET_DRIVE_HEAT` / `SET_DRIVE_COOL` | 28 / 18 °C | while zones call, the unit's setpoint is driven past any reachable return-air temperature so its own thermostat can never satisfy before the room sensor does (a relative target+2 bias proved insufficient: return air runs ~2.5 ° above the room, and the unit went quiet at setTemp 22 with the room at 19.6) |
+| `SET_PARK_HEAT` / `SET_PARK_COOL` | 16 / 32 °C | when no zone calls, the setpoint is parked where the unit stops delivering — this idles even a unit the autopilot doesn't own the power for |
 | `MIN_RUN_S` | 600 s | compressors hate short cycles |
 | `MIN_OFF_S` | 300 s | ditto, on the restart side |
 | `STALE_S` | 600 s | a sensor quieter than this is not a control input |
@@ -319,12 +320,17 @@ touching the control law.
    caused it.
 3. **If every zone is suspended**, turn the unit off — but only if the autopilot
    turned it on, minimum run time has elapsed, and the user hasn't overridden power.
-   Otherwise do nothing and leave the system in plain e-zone behaviour.
+   If it can't (or won't) power off, it parks the setpoint instead, so a unit it
+   doesn't own stops delivering on stale or safety-bounded sensors.
 4. **Unit power.** Demand and the unit is off → turn on, respecting minimum off
    time. No demand, unit is on and `owns_power` → turn off, respecting minimum run
    time. The wait is logged, so "why is it not on yet" is answerable.
-5. **Setpoint bias.** While running with demand, drive the unit's `setTemp` to
-   `max(targets) + 2` in heat, `min(targets) − 2` in cool, clamped to 16–32.
+5. **Setpoint drive/park.** While auto runs, the unit's `setTemp` is not a user
+   temperature — it is a binary actuator, decoupled from the room targets. Zones
+   calling → drive it out of the way (28 in heat, 18 in cool); no demand while the
+   unit runs → park it where the unit stops delivering (16 / 32). Changes made on
+   the wall tablet or vendor app are overwritten within a tick; disabling auto
+   hands the setpoint back to the room target.
 6. **Dampers.** A calling zone opens: 100 % while more than 0.5 ° from target, 60 %
    inside that — a stepped profile, not a proportional taper, because a proportional
    band makes the last degree take hours while the hysteresis band already does the

@@ -700,6 +700,7 @@ async def set_auto(change: AutoChange):
     if change.target is not None:
         auto_cfg["target"] = max(16.0, min(32.0, round(change.target * 2) / 2))
     if change.enabled is not None:
+        was_enabled = auto_cfg["enabled"]
         auto_cfg["enabled"] = change.enabled
         if change.enabled:
             # engaging auto is consent for auto to act now on every scope it drives
@@ -711,6 +712,23 @@ async def set_auto(change: AutoChange):
             pilot.calling.clear()
             pilot.suspended.clear()
             pilot.owns_power = False
+            if was_enabled:
+                # hand the unit's thermostat back: while auto ran, setTemp was
+                # a drive/park actuator value, not a temperature anyone chose
+                payload = {"ac1": {"info": {"setTemp": int(round(auto_cfg["target"]))}}}
+                if cache.ok:
+                    try:
+                        await client.set_aircon(payload)
+                        _note_recent(payload["ac1"])
+                    except EzoneError:
+                        _queue_change(payload["ac1"])
+                        cache.ok = False
+                else:
+                    _queue_change(payload["ac1"])
+                await asyncio.to_thread(
+                    _auto_log, "handback",
+                    f"setTemp -> {payload['ac1']['info']['setTemp']}",
+                )
     _save_auto()
     await asyncio.to_thread(
         _auto_log, "config",

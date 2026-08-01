@@ -62,8 +62,11 @@ zones. Control loop every 60s:
 
 - **Hysteresis** ±0.3 °C around target — no damper/compressor chatter.
 - **Anti-short-cycle:** minimum 10 min run, 5 min off for the unit.
-- **Setpoint bias:** unit setTemp driven to room-target +2 °C in heat
-  (−2 in cool) so the return-air loop never satisfies before the room does.
+- **Setpoint drive/park:** unit setTemp decoupled from the room target and
+  used as a binary actuator — driven to 28 °C in heat (18 in cool) while
+  zones call so the return-air loop never satisfies before the room does,
+  parked at 16 (32 in cool) when demand stops. (Superseded the original
+  relative target+2 bias, which the real return-air offset defeated.)
 - **Damper strategy:** calling zones open (proportional 30–100% in 5%
   steps); satisfied zones taper/close — the existing last-open-zone
   invariant is never violated.

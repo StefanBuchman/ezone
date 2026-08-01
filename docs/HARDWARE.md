@@ -285,10 +285,12 @@ logic.
 
 **Return-air sensing makes the setpoint a lie.** Setting 24 ° on an e-zone means
 "run until the return air reads 24 °", which is reached long before a cold room at
-the end of a long duct run is comfortable. That is why the autopilot biases the
-unit's setpoint 2 ° past the room target: the unit's own loop must never satisfy
-before the room sensor does. If your install has a `myZone` configured, its own
-thermostat behaves differently and the bias may need rethinking.
+the end of a long duct run is comfortable. Measured on this install: the unit went
+quiet at setTemp 22 while the room sensor still read 19.6 — a ~2.5 ° offset, which
+defeated the original "target + 2" bias. That is why the autopilot now decouples
+the setpoint entirely and uses it as a binary actuator: driven to 28 ° (heat) while
+zones call, parked at 16 ° when they're satisfied. If your install has a `myZone`
+configured, its own thermostat behaves differently and this may need rethinking.
 
 **USB 3 kills Zigbee.** Repeating it because it is invisible when it happens: a
 dongle plugged directly into a USB 3 port, or sitting next to an external SSD, gets
@@ -306,9 +308,9 @@ Roughly in order of how likely you are to need it:
    on, or relaxing, the last-open-zone invariant.
 4. **`MQTT_URL`** — or `""` if you have no sensors, in which case the app is a
    well-behaved remote control and the autopilot never engages.
-5. **Autopilot constants** in `backend/autopilot.py` — hysteresis, bias, cycle
-   timers and damper strategy are tuned for a two-zone ducted system in a temperate
-   climate. Change them, then run `python3 -m tests.sim_autopilot` to see whether the
+5. **Autopilot constants** in `backend/autopilot.py` — hysteresis, drive/park
+   setpoints, cycle timers and damper strategy are tuned for a two-zone ducted
+   system in a temperate climate. Change them, then run `python3 -m tests.sim_autopilot` to see whether the
    loop still reaches and holds target without short-cycling.
 6. **Multiple aircons** — `ac1` is assumed throughout `backend/`. A multi-unit system
    needs real work, not configuration.

@@ -9,7 +9,13 @@ from __future__ import annotations
 
 import sys
 
-from backend.autopilot import Autopilot, MIN_OFF_S, MIN_RUN_S
+from backend.autopilot import (
+    Autopilot,
+    MIN_OFF_S,
+    MIN_RUN_S,
+    SET_DRIVE_HEAT,
+    SET_PARK_HEAT,
+)
 
 TARGET = 21.5
 START = 18.0
@@ -18,6 +24,10 @@ DT = 30  # simulated seconds per step
 
 HEAT_RATE = 1.8   # deg/hour at 100% damper
 LOSS_RATE = 0.6   # deg/hour ambient loss
+# The unit's own thermostat cuts heat when RETURN AIR reaches setTemp, and
+# return air runs warmer than the room sensor (live 2026-08-02: unit went
+# quiet at setTemp 22 with the upstairs sensor still reading 19.6).
+RETURN_OFFSET = 3.0
 
 
 def run(verbose: bool = False) -> dict:
@@ -45,7 +55,11 @@ def run(verbose: bool = False) -> dict:
         now += DT
         # thermal model
         z = ac["zones"]["z02"]
-        heating = ac["info"]["state"] == "on" and z["state"] == "open"
+        heating = (
+            ac["info"]["state"] == "on"
+            and z["state"] == "open"
+            and temp + RETURN_OFFSET < ac["info"]["setTemp"]
+        )
         gain = HEAT_RATE * (z["value"] / 100) if heating else 0.0
         temp += (gain - LOSS_RATE) * (DT / 3600)
         temp = max(10.0, temp)
@@ -85,10 +99,56 @@ def run(verbose: bool = False) -> dict:
     }
 
 
+def _ac(set_temp=24.0):
+    return {
+        "info": {"state": "on", "mode": "heat", "setTemp": set_temp, "fan": "medium"},
+        "zones": {
+            "z01": {"name": "Downstairs", "state": "close", "value": 100},
+            "z02": {"name": "Upstairs", "state": "open", "value": 100},
+        },
+    }
+
+
+def behavior_checks() -> list[str]:
+    """Point checks of the setpoint drive/park actuator."""
+    fails = []
+    cfg = {"z02": {"enabled": True, "target": 20.0}}
+
+    def fresh(t):
+        return {"z02": {"temperature": t, "ageSeconds": 5, "stale": False}}
+
+    # calling: setpoint driven out of the way, stomping wall-app fiddling
+    change, _ = Autopilot().tick(cfg, _ac(24.0), fresh(19.0), set(), 1000.0)
+    if (change or {}).get("info", {}).get("setTemp") != SET_DRIVE_HEAT:
+        fails.append(f"calling should drive setTemp to {SET_DRIVE_HEAT}: {change}")
+
+    # satisfied while a unit auto did NOT start keeps running: park the
+    # setpoint so it stops delivering, but never power it off
+    change, _ = Autopilot().tick(cfg, _ac(SET_DRIVE_HEAT), fresh(20.6), set(), 1000.0)
+    info = (change or {}).get("info", {})
+    if info.get("setTemp") != SET_PARK_HEAT:
+        fails.append(f"satisfied should park setTemp at {SET_PARK_HEAT}: {change}")
+    if info.get("state") == "off":
+        fails.append(f"must not power off a unit auto did not start: {change}")
+
+    # a manual setTemp override through the app is respected
+    change, _ = Autopilot().tick(cfg, _ac(24.0), fresh(19.0), {"setTemp"}, 1000.0)
+    if "setTemp" in (change or {}).get("info", {}):
+        fails.append(f"setTemp override ignored: {change}")
+
+    # every zone suspended (stale sensor) on an unowned running unit: park
+    stale = {"z02": {"temperature": 20.0, "ageSeconds": 5, "stale": True}}
+    change, _ = Autopilot().tick(cfg, _ac(SET_DRIVE_HEAT), stale, set(), 1000.0)
+    if (change or {}).get("info", {}).get("setTemp") != SET_PARK_HEAT:
+        fails.append(f"suspended zones should park an unowned unit: {change}")
+
+    return fails
+
+
 if __name__ == "__main__":
     m = run(verbose="-v" in sys.argv)
     print("metrics:", m)
-    failures = []
+    failures = behavior_checks()
     if m["reached_h"] is None or m["reached_h"] > 4:
         failures.append(f"did not reach target in time ({m['reached_h']}h)")
     if m["excursion_pct"] > 2:
