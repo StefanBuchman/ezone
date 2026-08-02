@@ -21,6 +21,8 @@ function initialState() {
     lastFrameAt: null,
     recordsReceived: 0,
     probesReceived: 0,
+    heartbeatsReceived: 0,
+    lastHeartbeatAt: null,
     encryptedMessages: 0,
     decodedMessages: 0,
     decryptFailures: 0,
@@ -70,14 +72,21 @@ function recordBridge(record, receivedAt) {
     collectorId,
     firstSeen: receivedAt,
     records: 0,
+    heartbeats: 0,
+    lastHeartbeatAt: null,
+    lastRawCanAt: null,
+    androidRelease: "",
+    tabletModel: "",
+    appVersion: "",
   };
   bridge.lastSeen = receivedAt;
   bridge.records += 1;
-  bridge.androidRelease = safeText(record.androidRelease, 32);
-  bridge.tabletModel = safeText(record.tabletModel, 80);
-  bridge.appVersion = safeText(record.appVersion, 32);
+  bridge.androidRelease = safeText(record.androidRelease, 32) || bridge.androidRelease || "";
+  bridge.tabletModel = safeText(record.tabletModel, 80) || bridge.tabletModel || "";
+  bridge.appVersion = safeText(record.appVersion, 32) || bridge.appVersion || "";
   bridge.lastSequence = Number.isFinite(record.sequence) ? record.sequence : null;
   state.bridges[collectorId] = bridge;
+  return bridge;
 }
 
 function recordFrame(frame, receivedAt) {
@@ -156,15 +165,23 @@ async function ingest(records) {
     validateRecord(record);
     state.recordsReceived += 1;
     state.lastIngestAt = receivedAt;
-    recordBridge(record, receivedAt);
+    const bridge = recordBridge(record, receivedAt);
     await appendJournal("capture", receivedAt, { serverReceivedAt: receivedAt, ...record });
 
     if (record.kind === "collectorProbe") {
-      state.probesReceived += 1;
+      if (record.probeType === "aaServiceHeartbeat") {
+        state.heartbeatsReceived += 1;
+        state.lastHeartbeatAt = receivedAt;
+        bridge.heartbeats = (bridge.heartbeats ?? 0) + 1;
+        bridge.lastHeartbeatAt = receivedAt;
+      } else {
+        state.probesReceived += 1;
+      }
       continue;
     }
 
     state.encryptedMessages += 1;
+    bridge.lastRawCanAt = receivedAt;
     if (!key) continue;
 
     try {
@@ -239,9 +256,11 @@ const server = createServer(async (request, response) => {
 
   if (request.method === "GET" && url.pathname === "/summary") {
     const now = Date.now();
+    // Heartbeat uploads are rate-limited to one per 30s, so allow two missed
+    // intervals plus slack before calling a bridge offline.
     const bridges = Object.values(state.bridges).map((bridge) => ({
       ...bridge,
-      online: Boolean(bridge.lastSeen && now - Date.parse(bridge.lastSeen) < 30_000),
+      online: Boolean(bridge.lastSeen && now - Date.parse(bridge.lastSeen) < 75_000),
     }));
     return json(response, 200, {
       collector: {
