@@ -13,9 +13,50 @@ services:
       # in the same compose project; use the host IP (e.g. mqtt://10.160.1.251:1883)
       # if ezone is deployed as its own stack. Set to "" to disable.
       MQTT_URL: mqtt://mosquitto:1883
+      # Passive hardware-diagnostic collector, reachable only on the internal
+      # compose network (the published port below is for the tablet).
+      EZONE_MAINTENANCE_URL: http://maintenance-gateway:8787
       # EZONE_MOCK: "1"          # uncomment to run against a simulated tablet
     volumes:
       - ezone-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      # The collector comes up first so EZONE_MAINTENANCE_URL resolves on boot.
+      # Swap to `condition: service_started` if you would rather the climate app
+      # never wait on a diagnostics sidecar at deploy time.
+      maintenance-gateway:
+        condition: service_healthy
+
+  # Passive hardware-diagnostic collector for the Advantage Air CAN broadcast
+  # stream, fed by the Passive Tap APK on the wall tablet. RECEIVE-ONLY: it
+  # accepts capture records, decodes and journals them, and exposes no path
+  # that writes to the controller.
+  maintenance-gateway:
+    image: ghcr.io/stefanbuchman/ezone-maintenance-gateway:latest
+    container_name: ezone-maintenance-gateway
+    restart: unless-stopped
+    ports:
+      # Trusted-LAN ingress for the tablet. Publish nothing else: /ingest is
+      # bearer-token protected, /summary and /health are not (see .env.example).
+      - "${EZONE_MAINTENANCE_PORT:-3081}:8787"
+    environment:
+      # Never commit real values — supply them in .env (git-ignored).
+      EZONE_COLLECTOR_TOKEN: ${EZONE_COLLECTOR_TOKEN:?set EZONE_COLLECTOR_TOKEN in .env}
+      EZONE_BROADCAST_KEY_BASE64: ${EZONE_BROADCAST_KEY_BASE64:-}
+    volumes:
+      - ezone-maintenance-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8787/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 4s
+      start_period: 5s
+      retries: 3
 
 volumes:
   ezone-data:
+  ezone-maintenance-data:

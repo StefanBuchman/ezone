@@ -11,8 +11,37 @@ services:
       EZONE_PORT: "2025"
       POLL_SECONDS: "30"
       MQTT_URL: mqtt://mosquitto:1883
+      EZONE_MAINTENANCE_URL: http://maintenance-gateway:8787
     volumes:
       - ezone-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      maintenance-gateway:
+        condition: service_healthy
+
+  maintenance-gateway:
+    build: ./maintenance-gateway
+    container_name: ezone-maintenance-gateway
+    restart: unless-stopped
+    ports:
+      - "${EZONE_MAINTENANCE_PORT:-3081}:8787"
+    environment:
+      EZONE_COLLECTOR_TOKEN: ${EZONE_COLLECTOR_TOKEN:?set EZONE_COLLECTOR_TOKEN in .env}
+      EZONE_BROADCAST_KEY_BASE64: ${EZONE_BROADCAST_KEY_BASE64:-}
+    volumes:
+      - ezone-maintenance-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8787/health >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 4s
+      start_period: 5s
+      retries: 3
 
 volumes:
   ezone-data:
+  ezone-maintenance-data:

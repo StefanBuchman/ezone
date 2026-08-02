@@ -2,6 +2,8 @@
 __pycache__/
 *.pyc
 data/
+.env
+.env.local
 .claude/
 .DS_Store
 nohup.out
