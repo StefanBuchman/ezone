@@ -66,10 +66,6 @@ Most of this codebase is a response to those four facts.
 - **History and maintenance** — SQLite snapshots every poll, a 24-hour per-zone
   temperature chart, today's runtime by hour and by mode, tablet-reachability
   statistics, and a filter-hours counter you reset when you clean the filter.
-- **Passive hardware diagnostics** — an optional receive-only sidecar
-  ([maintenance gateway](docs/MAINTENANCE-GATEWAY.md)) that collects the
-  Advantage Air CAN broadcast stream captured by the wall tablet, decodes and
-  journals it to a named volume, and never writes to the controller.
 - **Real outdoor temperature** from Open-Meteo, using the coordinates the tablet
   already knows (the tablet's own suburb feed can be hours stale).
 
