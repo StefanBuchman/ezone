@@ -112,24 +112,30 @@ def _get_path(node, path):
     return node
 
 
-def _prune_recent() -> None:
-    """Drop intent entries the tablet has confirmed, plus expired ones."""
+def _prune_recent() -> list:
+    """Drop intent entries the tablet has confirmed, plus expired ones.
+    Returns (path, latency) for each entry the tablet just confirmed, so the
+    write-confirm latency can be recorded (a tablet-health metric)."""
     now = time.time()
     ac = cache.data["aircons"]["ac1"] if cache.data else {}
-    kept = []
+    kept, confirmed = [], []
     for e in recent:
         if now - e["ts"] > RECENT_TTL:
-            continue
+            continue  # expired, not confirmed — don't count as latency
         current = _get_path(ac, e["path"])
+        done = False
         if e["path"][-1] in ("countDownToOff", "countDownToOn"):
             # the tablet immediately ticks countdowns below the set value
             v = e["value"]
-            if (v == 0 and not current) or (v > 0 and current and 0 < current <= v):
-                continue
-        elif current == e["value"]:
+            done = (v == 0 and not current) or (v > 0 and current and 0 < current <= v)
+        else:
+            done = current == e["value"]
+        if done:
+            confirmed.append((e["path"], now - e["ts"]))
             continue
         kept.append(e)
     recent[:] = kept
+    return confirmed
 
 
 def _load_pending() -> None:
@@ -203,6 +209,25 @@ def _init_db() -> sqlite3.Connection:
             zones TEXT, error_code TEXT, filter_status INTEGER
         )"""
     )
+    # M0 additions: outdoor temp (rates are meaningless without it) and the
+    # full tablet info block (real diagnostics — firmware revs, every error
+    # code, constants — captured verbatim so future analysis isn't limited to
+    # today's column choices). ALTER is a no-op after the first run.
+    for col, decl in (("outdoor", "REAL"), ("info", "TEXT")):
+        try:
+            conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {decl}")
+        except sqlite3.OperationalError:
+            pass
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS confirm_latency (ts INTEGER, path TEXT, latency REAL)"
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS daily (
+            day TEXT PRIMARY KEY, runtime_s INTEGER, cycles INTEGER,
+            by_mode TEXT, uptime_pct REAL, outdoor_mean REAL,
+            rate_samples TEXT, sensor_stats TEXT
+        )"""
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS activity (ts REAL, source TEXT, kind TEXT, detail TEXT)"
     )
@@ -211,7 +236,7 @@ def _init_db() -> sqlite3.Connection:
     return conn
 
 
-def _record_snapshot(data: dict) -> None:
+def _record_snapshot(data: dict, confirmed: list | None = None) -> None:
     info = data["aircons"]["ac1"]["info"]
     zones = {}
     for zid, z in data["aircons"]["ac1"]["zones"].items():
@@ -219,12 +244,20 @@ def _record_snapshot(data: dict) -> None:
         zones[zid] = {
             "state": z["state"],
             "value": z["value"],
+            # real per-zone diagnostics from the tablet, plus Zigbee readings
+            "error": z.get("error"),
+            "rssi": z.get("rssi"),
+            "tempSensorClash": z.get("tempSensorClash"),
             "measuredTemp": reading["temperature"] if reading and not reading["stale"] else None,
             "humidity": reading["humidity"] if reading and not reading["stale"] else None,
+            "battery": reading.get("battery") if reading else None,
+            "linkquality": reading.get("linkquality") if reading else None,
         }
     with db_lock:
         db.execute(
-            "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO snapshots "
+            "(ts, state, mode, set_temp, fan, zones, error_code, filter_status, outdoor, info) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
             (
                 int(time.time()),
                 info.get("state"),
@@ -234,8 +267,15 @@ def _record_snapshot(data: dict) -> None:
                 json.dumps(zones),
                 info.get("airconErrorCode", ""),
                 info.get("filterCleanStatus", 0),
+                outdoor["temp"] if time.time() - outdoor["at"] < 7200 else None,
+                json.dumps(info),  # full real diagnostic block, verbatim
             ),
         )
+        for path, latency in confirmed or []:
+            db.execute(
+                "INSERT INTO confirm_latency VALUES (?,?,?)",
+                (int(time.time()), ".".join(path), round(latency, 2)),
+            )
         db.commit()
 
 
@@ -295,8 +335,8 @@ async def _refresh() -> None:
         cache.error = ""
         explained = _explained_intents()
         await asyncio.to_thread(_log_external, prev_data, was_ok, explained)
-        _prune_recent()
-        await asyncio.to_thread(_record_snapshot, data)
+        confirmed = _prune_recent()
+        await asyncio.to_thread(_record_snapshot, data, confirmed)
         await asyncio.to_thread(
             _last_state_path().write_text, json.dumps({"at": cache.fetched_at, "data": data})
         )
@@ -313,7 +353,9 @@ def _record_offline() -> None:
     """Log failed polls too, so tablet sleep behaviour can be measured."""
     with db_lock:
         db.execute(
-            "INSERT OR REPLACE INTO snapshots VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO snapshots "
+            "(ts, state, mode, set_temp, fan, zones, error_code, filter_status) "
+            "VALUES (?,?,?,?,?,?,?,?)",
             (int(time.time()), "unreachable", None, None, None, "{}", "", 0),
         )
         db.commit()
@@ -433,6 +475,105 @@ def _auto_log(action: str, reason: str) -> None:
             db.commit()
     except sqlite3.Error:
         log.warning("auto_log write failed: %s %s", action, reason)
+
+
+def _compute_daily(day: str, start: int, end: int) -> None:
+    """Aggregate one local day of snapshots into the daily rollup table."""
+    with db_lock:
+        rows = db.execute(
+            "SELECT ts, state, mode, zones, outdoor FROM snapshots "
+            "WHERE ts >= ? AND ts < ? ORDER BY ts",
+            (start, end),
+        ).fetchall()
+    if not rows:
+        return
+    runtime = cycles = 0
+    by_mode: dict[str, int] = {}
+    outdoor_vals: list[float] = []
+    sensor_stats: dict[str, dict] = {}
+    rate_samples: list[dict] = []
+    seg: dict[str, list] = {}  # zid -> [first_ts, first_temp, last_ts, last_temp, damper_sum, n, outdoor_sum, o_n]
+    prev_ts = prev_state = prev_mode = None
+
+    def close_segments(mode):
+        for zid, s in seg.items():
+            dur_h = (s[2] - s[0]) / 3600
+            if dur_h >= 1 / 6 and s[5] > 0:  # >= 10 minutes of data
+                rate_samples.append({
+                    "zid": zid, "mode": mode,
+                    "rate": round((s[3] - s[1]) / dur_h, 2),
+                    "damper": round(s[4] / s[5]),
+                    "outdoor": round(s[6] / s[7], 1) if s[7] else None,
+                    "mins": round(dur_h * 60),
+                })
+        seg.clear()
+
+    for ts, st, mode, zones_json, outdoor_t in rows:
+        if outdoor_t is not None:
+            outdoor_vals.append(outdoor_t)
+        try:
+            zones = json.loads(zones_json)
+        except ValueError:
+            zones = {}
+        for zid, z in zones.items():
+            t = z.get("measuredTemp")
+            if t not in (None, 0):
+                stats = sensor_stats.setdefault(zid, {"reports": 0, "batteryMin": 101})
+                stats["reports"] += 1
+                if z.get("battery") is not None:
+                    stats["batteryMin"] = min(stats["batteryMin"], z["battery"])
+        gap_ok = prev_ts is not None and ts - prev_ts <= POLL_SECONDS * 4
+        if prev_state == "on" and gap_ok:
+            dur = ts - prev_ts
+            runtime += dur
+            by_mode[prev_mode] = by_mode.get(prev_mode, 0) + dur
+            for zid, z in zones.items():
+                t = z.get("measuredTemp")
+                if t in (None, 0) or z.get("state") != "open":
+                    continue
+                s = seg.setdefault(zid, [ts, t, ts, t, 0, 0, 0.0, 0])
+                s[2], s[3] = ts, t
+                s[4] += z.get("value", 0); s[5] += 1
+                if outdoor_t is not None:
+                    s[6] += outdoor_t; s[7] += 1
+        elif seg:
+            close_segments(prev_mode)
+        if st == "on" and prev_state != "on":
+            cycles += 1
+        prev_ts, prev_state, prev_mode = ts, st, mode
+    if seg:
+        close_segments(prev_mode)
+
+    total = len(rows)
+    offline = sum(1 for r in rows if r[1] == "unreachable")
+    with db_lock:
+        db.execute(
+            "INSERT OR REPLACE INTO daily VALUES (?,?,?,?,?,?,?,?)",
+            (
+                day, runtime, cycles, json.dumps(by_mode),
+                round(100 * (1 - offline / total), 1) if total else None,
+                round(sum(outdoor_vals) / len(outdoor_vals), 1) if outdoor_vals else None,
+                json.dumps(rate_samples), json.dumps(sensor_stats),
+            ),
+        )
+        db.commit()
+
+
+async def _rollup_loop() -> None:
+    """Hourly: fill in any missing daily rollups for the past week."""
+    while True:
+        try:
+            for back in range(1, 8):
+                lt = time.localtime(time.time() - back * 86400)
+                day = time.strftime("%Y-%m-%d", lt)
+                start = int(time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1)))
+                with db_lock:
+                    have = db.execute("SELECT 1 FROM daily WHERE day = ?", (day,)).fetchone()
+                if not have:
+                    await asyncio.to_thread(_compute_daily, day, start, start + 86400)
+        except Exception:  # noqa: BLE001
+            log.exception("rollup failed")
+        await asyncio.sleep(3600)
 
 
 async def _auto_loop() -> None:
@@ -588,6 +729,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_deliver_loop()),
         asyncio.create_task(_outdoor_loop()),
         asyncio.create_task(_auto_loop()),
+        asyncio.create_task(_rollup_loop()),
     ]
     if EZONE_MOCK and os.environ.get("MOCK_SENSOR") == "1":
         from .sensors import SimFeed
@@ -986,6 +1128,33 @@ async def temps(hours: int = Query(24, ge=1, le=168)):
             }
             for zid, buckets in acc.items()
         },
+    }
+
+
+@app.get("/api/health/trends")
+async def health_trends(days: int = Query(30, ge=1, le=365)):
+    """M0 rollups: one row per day, plus recent write-confirm latency."""
+    with db_lock:
+        rows = db.execute(
+            "SELECT day, runtime_s, cycles, by_mode, uptime_pct, outdoor_mean, "
+            "rate_samples, sensor_stats FROM daily ORDER BY day DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+        lat = db.execute(
+            "SELECT COUNT(*), AVG(latency) FROM confirm_latency WHERE ts >= ?",
+            (int(time.time()) - 7 * 86400,),
+        ).fetchone()
+    return {
+        "days": [
+            {
+                "day": r[0], "runtimeSeconds": r[1], "cycles": r[2],
+                "byMode": json.loads(r[3] or "{}"), "uptimePct": r[4],
+                "outdoorMean": r[5], "rateSamples": json.loads(r[6] or "[]"),
+                "sensorStats": json.loads(r[7] or "{}"),
+            }
+            for r in rows
+        ],
+        "confirmLatency7d": {"count": lat[0], "meanSeconds": round(lat[1], 2) if lat[1] else None},
     }
 
 
