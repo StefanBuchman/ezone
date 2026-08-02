@@ -37,9 +37,8 @@ button { font: inherit; color: inherit; background: none; border: none; cursor: 
 button:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 
 .page {
-  max-width: 430px; margin: 0 auto;
-  /* bottom padding clears the fixed tab bar */
-  padding: 16px 18px calc(78px + env(safe-area-inset-bottom, 0px));
+  max-width: 430px; margin: 0 auto; min-height: 100dvh;
+  padding: 16px 18px max(10px, env(safe-area-inset-bottom, 10px));
   display: flex; flex-direction: column; gap: 16px;
 }
 
@@ -354,30 +353,73 @@ input[type="range"]::-moz-range-thumb {
 }
 @keyframes pane-in { from { opacity: 0; transform: translateY(6px); } }
 
-.pane-hdr { margin-top: 2px; }
-.pane-title { font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
-.pane-sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
+.pane-hdr { display: flex; align-items: baseline; justify-content: space-between; margin-top: 2px; }
+.pane-title { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.pane-note { font-size: 11px; color: var(--dim); }
 
+/* floating morph capsules (design 5b): no bar, the pills float free */
 .tabbar {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 8;
-  background: color-mix(in srgb, var(--bg) 88%, transparent);
-  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
-  border-top: 1px solid var(--ln);
+  position: sticky; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8;
+  margin-top: auto; padding-top: 10px;
+  display: flex; gap: 8px; justify-content: center;
 }
-.tabbar-inner {
-  max-width: 430px; margin: 0 auto;
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  padding: 6px 14px calc(8px + env(safe-area-inset-bottom, 0px));
+.tab-cap {
+  display: flex; align-items: center; gap: 0;
+  height: 46px; padding: 0 14px; border-radius: 999px;
+  background: var(--chip); color: var(--dim);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  transition: all 0.25s;
 }
-.tab-btn {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 7px 0 3px; color: var(--dim);
-  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  transition: color 0.15s;
+.tab-cap.active { gap: 7px; padding: 0 18px; background: var(--acc); color: #fff; }
+.tab-cap svg { flex-shrink: 0; }
+.tab-lbl {
+  max-width: 0; overflow: hidden; white-space: nowrap; opacity: 0;
+  font-size: 12px; font-weight: 600;
+  transition: max-width 0.25s, opacity 0.25s;
 }
-.tab-btn.active { color: var(--acc); }
-.tab-btn svg { transition: transform 0.15s; }
-.tab-btn:active svg { transform: scale(0.88); }
+.tab-cap.active .tab-lbl { max-width: 90px; opacity: 1; }
+
+/* summary card (activity head) */
+.sum-card { display: flex; justify-content: space-between; padding: 14px 16px; }
+.sum-lbl { font-size: 10px; color: var(--dim); }
+.sum-val { font-size: 15px; font-weight: 700; margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+/* grouped list (system screen) */
+.glist {
+  display: grid; gap: 1px; background: var(--ln);
+  border: 1px solid var(--ln); border-radius: 18px; overflow: hidden;
+}
+.glist-row {
+  background: var(--pn); padding: 13px 16px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.gl-lbl { font-size: 12px; color: var(--dim); }
+.gl-val { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.gl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.gl-dot.down { background: var(--bad); }
+.gl-dot.stale { background: var(--warn); }
+.tag-ok {
+  font-size: 10px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  background: rgba(65, 208, 140, 0.16); color: var(--ok);
+}
+.tag-warn {
+  font-size: 10px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  background: rgba(217, 164, 65, 0.16); color: var(--warn);
+}
+
+/* maintenance card */
+.maint-card { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.maint-top { display: flex; align-items: baseline; justify-content: space-between; }
+.maint-name { font-size: 13px; font-weight: 600; }
+.maint-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.maint-bar { position: relative; height: 8px; border-radius: 4px; background: var(--chip); }
+.maint-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0%;
+  border-radius: 4px; background: linear-gradient(90deg, var(--accD), var(--acc));
+  transition: width 0.3s;
+}
+.maint-sub { font-size: 11px; color: var(--dim); }
+.glrow { display: flex; align-items: center; justify-content: space-between; }
 
 /* ---- activity tab · the flight recorder ---- */
 .act-filters { display: flex; gap: 6px; }

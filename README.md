@@ -54,9 +54,11 @@ Most of this codebase is a response to those four facts.
   drives every sensor-equipped zone toward it — hysteresis, anti-short-cycle
   timers, a decoupled drive/park unit setpoint, damper strategy, fail-safes, and
   an audit log of every decision. Sensorless zones stay manual.
-- **Three-tab interface** — a bottom tab bar splits the app into Control (dial,
-  modes, zones, schedules), Activity, and Trends (runtime and temperature
-  history), with hash routing so the phone's back button moves between tabs.
+- **Three-tab interface** — floating "morph" capsule tabs (the active one
+  expands into an accent pill with its label) split the app into Control (dial,
+  modes, zones, schedules), Activity, and System (controller health, filter
+  maintenance, runtime and temperature history), with hash routing so the
+  phone's back button moves between tabs and scroll positions are preserved.
 - **Activity feed** — a flight recorder for the whole system: a mobile-first
   timeline of every change and who made it — you, the autopilot, or the wall
   panel/vendor app (unexplained tablet-side changes are detected and attributed),

@@ -106,8 +106,13 @@
   <div class="tab-pane" id="tab-activity" role="tabpanel" aria-label="Activity">
     <header class="pane-hdr">
       <div class="pane-title">Activity</div>
-      <div class="pane-sub">everything that moved, and who moved it</div>
+      <div class="pane-note">who moved what</div>
     </header>
+    <section class="card sum-card" id="actSummary" hidden>
+      <div><div class="sum-lbl">Runtime today</div><div class="sum-val" id="sumRuntime">&mdash;</div></div>
+      <div><div class="sum-lbl">Cycles</div><div class="sum-val" id="sumCycles">&mdash;</div></div>
+      <div><div class="sum-lbl">Events</div><div class="sum-val" id="sumEvents">&mdash;</div></div>
+    </section>
     <div class="act-filters" id="actFilters">
       <button class="chip-btn active" data-src="">all</button>
       <button class="chip-btn" data-src="you">you</button>
@@ -125,12 +130,33 @@
     </div>
   </div><!-- /tab-activity -->
 
-  <!-- ================= tab · trends ================= -->
-  <div class="tab-pane" id="tab-trends" role="tabpanel" aria-label="Trends">
+  <!-- ================= tab · system ================= -->
+  <div class="tab-pane" id="tab-system" role="tabpanel" aria-label="System">
     <header class="pane-hdr">
-      <div class="pane-title">Trends</div>
-      <div class="pane-sub">how the house is running</div>
+      <div class="pane-title">System</div>
+      <div class="pane-note">e-zone controller</div>
     </header>
+
+    <!-- controller -->
+    <div class="glist">
+      <div class="glist-row"><span class="gl-lbl">Status</span><span class="gl-val" id="sysStatus">&mdash;</span></div>
+      <div class="glist-row"><span class="gl-lbl">IP address</span><span class="gl-val" id="sysIp">&mdash;</span></div>
+      <div class="glist-row"><span class="gl-lbl">Firmware</span><span class="gl-val" id="sysFw">&mdash;</span></div>
+      <div class="glist-row"><span class="gl-lbl">Reachability &middot; 24h</span><span class="gl-val" id="sysUptime">&mdash;</span></div>
+      <div class="glist-row"><span class="gl-lbl">Error code</span><span class="gl-val" id="sysError">&mdash;</span></div>
+    </div>
+
+    <!-- maintenance -->
+    <div class="sec-lbl">Maintenance</div>
+    <section class="card maint-card">
+      <div class="maint-top"><span class="maint-name">Filter runtime</span><span class="maint-val" id="filterHours">&mdash;</span></div>
+      <div class="maint-bar"><div class="maint-fill" id="filterFill"></div></div>
+      <div class="maint-sub" id="filterSub"></div>
+      <div class="divider"></div>
+      <div class="glrow"><span class="gl-lbl">Last marked clean</span><span class="gl-val" id="filterWhen">&mdash;</span></div>
+      <div class="glrow"><span class="gl-lbl">Tablet filter flag</span><span class="gl-val" id="sysTabletFlag">&mdash;</span></div>
+      <button class="lbl filter-btn" id="filterBtn" hidden></button>
+    </section>
 
     <!-- 4 · today -->
     <section class="card today-card" id="todayCard" hidden>
@@ -138,7 +164,6 @@
         <div class="lbl" id="todayTitle">Runtime today</div>
         <div class="today-big" id="todayRuntime">0m</div>
         <div class="lbl" id="todaySub"></div>
-        <button class="lbl filter-btn" id="filterBtn" hidden></button>
       </div>
       <svg id="spark" width="118" height="38" viewBox="0 0 118 38" aria-label="Hours the system ran today"></svg>
     </section>
@@ -149,33 +174,31 @@
       <svg id="tempChart" height="120" aria-label="Zone temperature over the last 24 hours"></svg>
       <div class="temps-legend" id="tempsLegend"></div>
     </section>
-  </div><!-- /tab-trends -->
+  </div><!-- /tab-system -->
+
+  <!-- floating morph tab capsules (design 5b) -->
+  <nav class="tabbar" role="tablist" aria-label="Sections">
+    <button class="tab-cap active" id="tabBtn-control" data-tab="control" role="tab" aria-selected="true">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 8h7m5 0h2M14.5 5v6M5 16h2m5 0h7M9.5 13v6"/>
+      </svg>
+      <span class="tab-lbl">Control</span>
+    </button>
+    <button class="tab-cap" id="tabBtn-activity" data-tab="activity" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.5 12h3.5l3-7.5 4 15 3-7.5h3.5"/>
+      </svg>
+      <span class="tab-lbl">Activity</span>
+    </button>
+    <button class="tab-cap" id="tabBtn-system" data-tab="system" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+      </svg>
+      <span class="tab-lbl">System</span>
+    </button>
+  </nav>
 
 </div>
-
-<!-- bottom tab bar -->
-<nav class="tabbar" role="tablist" aria-label="Sections">
-  <div class="tabbar-inner">
-    <button class="tab-btn active" id="tabBtn-control" data-tab="control" role="tab" aria-selected="true">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v4.5l3 2"/><path d="M12 3.8v-1M20.2 12h1M12 20.2v1M3.8 12h-1" opacity="0.55"/>
-      </svg>
-      <span>Control</span>
-    </button>
-    <button class="tab-btn" id="tabBtn-activity" data-tab="activity" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 12h3l2.5-6 4 12 2.5-6h4"/>
-      </svg>
-      <span>Activity</span>
-    </button>
-    <button class="tab-btn" id="tabBtn-trends" data-tab="trends" role="tab" aria-selected="false">
-      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 19V5M4 19h16"/><path d="M7.5 14.5l3.5-4 3 2.5 4.5-6"/>
-      </svg>
-      <span>Trends</span>
-    </button>
-  </div>
-</nav>
 
 <div class="toast" id="toast" role="status"></div>
 

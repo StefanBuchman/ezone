@@ -510,17 +510,54 @@ function renderFilter(t) {
   const btn = $("filterBtn");
   if (t.filterRuntimeSeconds == null) { btn.hidden = true; return; }
   btn.hidden = false;
+
+  const hours = t.filterRuntimeSeconds / 3600;
+  const shown = hours < 1 ? "<1h" : `${Math.round(hours)}h`;
+  const due = hours >= FILTER_WARN_HOURS;
+  const tabletDue = state.local?.info?.filterCleanStatus;
+
+  $("filterHours").textContent = `${shown} of ${FILTER_WARN_HOURS}h`;
+  $("filterFill").style.width = `${Math.min(100, (hours / FILTER_WARN_HOURS) * 100).toFixed(1)}%`;
+  $("filterSub").textContent = due
+    ? "past the clean interval — clean the return filter"
+    : `runtime since you last marked it clean · clean at ${FILTER_WARN_HOURS}h`;
+  $("filterWhen").textContent = t.filterCleanedAt
+    ? new Date(t.filterCleanedAt * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })
+    : "—";
+  $("sysTabletFlag").innerHTML = tabletDue
+    ? '<span class="tag-warn">clean due</span>'
+    : '<span class="tag-ok">clear</span>';
+
   if (filterUi.confirm) {
     btn.textContent = "mark filter cleaned?";
     btn.className = "lbl filter-btn confirm";
     return;
   }
-  const hours = t.filterRuntimeSeconds / 3600;
-  const shown = hours < 1 ? "<1h" : `${Math.round(hours)}h`;
-  const due = hours >= FILTER_WARN_HOURS;
-  const tabletDue = state.local?.info?.filterCleanStatus;
-  btn.textContent = `filter ${shown} since clean${due ? " · clean soon" : ""}${tabletDue ? " · tablet says due" : ""}`;
+  btn.textContent = "mark filter cleaned";
   btn.className = `lbl filter-btn${due || tabletDue ? " warn" : ""}`;
+}
+
+function renderSystem() {
+  const sys = state.system, info = state.local?.info, remote = state.remote;
+  if (!sys || !info) return;
+  const ok = remote?.ok, stale = ok && remote.ageSeconds > 90;
+  $("sysStatus").innerHTML =
+    `<span class="gl-dot${ok ? (stale ? " stale" : "") : " down"}"></span>${ok ? (stale ? "Stale" : "Online") : "Unreachable"}`;
+  $("sysIp").textContent = sys.tspIp || "—";
+  $("sysFw").textContent = `${info.cbFWRevMajor}.${info.cbFWRevMinor} · app ${sys.myAppRev || "—"}`;
+  const up = state.health?.tabletUptime24h;
+  $("sysUptime").textContent = up != null ? `${up}%` : "—";
+  const err = info.airconErrorCode;
+  $("sysError").innerHTML = err
+    ? `<span class="tag-warn">${esc(String(err))}</span>`
+    : '<span class="tag-ok">none</span>';
+}
+
+async function fetchHealth() {
+  try {
+    const res = await fetch("/api/health");
+    if (res.ok) { state.health = await res.json(); renderSystem(); }
+  } catch { /* quiet */ }
 }
 
 async function markFilterCleaned() {
@@ -556,6 +593,7 @@ function renderToday() {
   parts.push(`${t.cycles} ${t.cycles === 1 ? "cycle" : "cycles"}`);
   $("todaySub").textContent = parts.join(" · ");
   renderFilter(t);
+  renderActSummary();
 
   // hourly runtime strip: one bar per hour of today, height = minutes run
   const svg = $("spark");
@@ -628,6 +666,7 @@ function render() {
   renderZones();
   renderHeader();
   renderToday();
+  renderSystem();
   renderSyncCues();
   renderFoot();
 }
@@ -972,6 +1011,16 @@ function renderActivity(animate) {
   $("actEmpty").hidden = ACT.entries.length > 0;
 }
 
+function renderActSummary() {
+  const t = state.today;
+  const card = $("actSummary");
+  if (!t) { card.hidden = true; return; }
+  card.hidden = false;
+  $("sumRuntime").textContent = fmtMins(Math.round(t.runtimeSeconds / 60));
+  $("sumCycles").textContent = String(t.cycles);
+  $("sumEvents").textContent = ACT.todayCount != null ? String(ACT.todayCount) : "—";
+}
+
 async function fetchActivity(reset) {
   if (ACT.loading) return;
   ACT.loading = true;
@@ -979,15 +1028,19 @@ async function fetchActivity(reset) {
   $("actMore").hidden = false;
   try {
     const before = reset || !ACT.entries.length ? 0 : ACT.entries[ACT.entries.length - 1].ts;
-    const url = `/api/activity?limit=60${before ? `&before=${before}` : ""}${ACT.filter ? `&sources=${ACT.filter}` : ""}`;
+    const midnight = new Date();
+    midnight.setHours(0, 0, 0, 0);
+    const url = `/api/activity?limit=60${before ? `&before=${before}` : ""}` +
+      `${ACT.filter ? `&sources=${ACT.filter}` : ""}` +
+      (reset ? `&countSince=${midnight.getTime() / 1000}` : "");
     const res = await fetch(url);
     if (!res.ok) throw new Error(res.statusText);
     const data = await res.json();
     ACT.entries = reset ? data.entries : ACT.entries.concat(data.entries);
     ACT.more = data.more;
+    if (data.todayCount != null) { ACT.todayCount = data.todayCount; renderActSummary(); }
     if (ACT.entries.length) ACT.newest = Math.max(ACT.newest, ACT.entries[0].ts);
     renderActivity(reset);
-    if (reset) window.scrollTo({ top: 0 });
     $("actNew").hidden = true;
   } catch (err) {
     toast(`Couldn't load activity: ${err.message}`, true);
@@ -1006,12 +1059,13 @@ async function checkNewActivity() {
 }
 
 function initActivity() {
-  $("actNew").addEventListener("click", () => fetchActivity(true));
+  $("actNew").addEventListener("click", () => { window.scrollTo({ top: 0 }); fetchActivity(true); });
   $("actFilters").addEventListener("click", (e) => {
     const btn = e.target.closest(".chip-btn");
     if (!btn) return;
     ACT.filter = btn.dataset.src;
     document.querySelectorAll("#actFilters .chip-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    window.scrollTo({ top: 0 });
     fetchActivity(true);
   });
   window.addEventListener("scroll", () => {
@@ -1022,12 +1076,15 @@ function initActivity() {
 
 /* ================= tabs ================= */
 
-const TAB_NAMES = ["control", "activity", "trends"];
+const TAB_NAMES = ["control", "activity", "system"];
 let activeTab = "control";
+const tabScroll = {}; // per-tab scroll memory (design 5b: preserve positions)
 
 function activateTab(name, via) {
+  if (name === "trends") name = "system"; // pre-5b links keep working
   if (!TAB_NAMES.includes(name)) name = "control";
   const changed = name !== activeTab;
+  if (changed) tabScroll[activeTab] = window.scrollY;
   activeTab = name;
   TAB_NAMES.forEach((t) => {
     $(`tab-${t}`).classList.toggle("active", t === name);
@@ -1035,12 +1092,13 @@ function activateTab(name, via) {
     btn.classList.toggle("active", t === name);
     btn.setAttribute("aria-selected", String(t === name));
   });
-  if (changed) window.scrollTo({ top: 0 });
+  if (changed) window.scrollTo({ top: tabScroll[name] || 0 });
   clearInterval(ACT.poll);
   if (name === "activity") {
     fetchActivity(true);
     ACT.poll = setInterval(checkNewActivity, 25000);
   }
+  if (name === "system") fetchHealth();
   const hash = name === "control" ? "" : `#${name}`;
   if (via === "click" && location.hash !== hash) {
     history.pushState(null, "", hash || location.pathname + location.search);
@@ -1048,7 +1106,7 @@ function activateTab(name, via) {
 }
 
 function initTabs() {
-  document.querySelectorAll(".tab-btn").forEach((b) =>
+  document.querySelectorAll(".tab-cap").forEach((b) =>
     b.addEventListener("click", () => activateTab(b.dataset.tab, "click"))
   );
   window.addEventListener("hashchange", () =>

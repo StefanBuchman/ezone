@@ -276,6 +276,7 @@ composes the sentences.
 | `limit` | int | `60` | 1–200; the response's `more` says whether older entries exist |
 | `before` | float | — | page backwards: return entries strictly older than this `ts` |
 | `sources` | str | — | comma-separated filter, e.g. `sources=you,auto` |
+| `countSince` | float | — | when set, the response gains `todayCount`: total entries with `ts >=` this value (the client passes its local midnight for the Activity summary card) |
 
 | `source` | Meaning |
 |----------|---------|

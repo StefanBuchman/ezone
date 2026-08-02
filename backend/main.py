@@ -885,6 +885,7 @@ async def get_activity(
     before: float = Query(0),
     limit: int = Query(60, ge=1, le=200),
     sources: str = Query(""),
+    countSince: float = Query(0),
 ):
     """Unified activity feed, newest first. `before` pages backwards."""
     conds, args = [], []
@@ -902,13 +903,20 @@ async def get_activity(
     args.append(limit + 1)
     with db_lock:
         rows = db.execute(q, args).fetchall()
-    return {
+        today = (
+            db.execute("SELECT COUNT(*) FROM activity WHERE ts >= ?", (countSince,)).fetchone()[0]
+            if countSince else None
+        )
+    out = {
         "entries": [
             {"ts": r[0], "source": r[1], "kind": r[2], "detail": json.loads(r[3])}
             for r in rows[:limit]
         ],
         "more": len(rows) > limit,
     }
+    if today is not None:
+        out["todayCount"] = today
+    return out
 
 
 @app.get("/api/temps")
