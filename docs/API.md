@@ -154,6 +154,14 @@ the tablet is asleep — queued.
 | `countDownToOff` | number | minutes, clamped to 0–720. `0` cancels |
 | `countDownToOn` | number | minutes, clamped to 0–720. `0` cancels |
 
+**While auto is engaged**, `setTemp` is not written to the tablet — the unit's
+thermostat is a drive/park actuator owned by the control loop, so a raw
+setpoint write can only come from a client with a stale view of the auto
+state. The value is redirected into the auto target instead (clamped 16–32,
+half-degree steps), no `setTemp` manual override is marked, and the response
+carries `coercedTarget` so the UI can explain what happened. Other fields in
+the same request are applied normally.
+
 `zones` is `{"<zone id>": {...}}` where the zone id must exist on the system
 (`"z01"`, `"z02"`, …) and only these keys are accepted:
 
@@ -172,6 +180,7 @@ for the **409** case.
 |-------|---------|
 | `queued` | `true` if the tablet was unreachable and the change was stored for later delivery |
 | `ack` | the tablet's raw acknowledgement, only present when `queued` is `false` |
+| `coercedTarget` | present only when a `setTemp` write arrived while auto was engaged: the value it was redirected to as the new auto target |
 
 ```bash
 # turn on, heat, 22°

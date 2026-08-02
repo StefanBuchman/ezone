@@ -724,7 +724,39 @@ def _validate_change(change: AirconChange) -> dict:
 async def set_aircon(change: AirconChange):
     if cache.data is None:
         await _refresh()
+
+    # Stale-client guard: while auto is engaged, setTemp on the tablet is a
+    # drive/park actuator value, so a raw setpoint write can only come from a
+    # client that hasn't yet learned auto is on (e.g. a PWA resumed from
+    # overnight). Steer it into the auto target instead of the tablet, and no
+    # setTemp override is marked — this is a target change, not manual-wins.
+    coerced_target = None
+    if auto_cfg["enabled"] and "setTemp" in change.info:
+        try:
+            wanted = float(change.info.pop("setTemp"))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "bad setTemp value")
+        coerced_target = max(16.0, min(32.0, round(wanted * 2) / 2))
+
+    async def _apply_coercion():
+        auto_cfg["target"] = coerced_target
+        _save_auto()
+        await asyncio.to_thread(_activity, "you", [("target", {"value": coerced_target})])
+        await asyncio.to_thread(
+            _auto_log, "config",
+            f"setTemp write while auto engaged coerced to target={coerced_target}",
+        )
+
+    if coerced_target is not None and not change.info and not change.zones:
+        await _apply_coercion()
+        return {"coercedTarget": coerced_target, "queued": False, **_state_payload()}
+    coerced = {} if coerced_target is None else {"coercedTarget": coerced_target}
+
+    # validate the remaining fields before the coercion lands, so an invalid
+    # payload is rejected whole rather than half-applied
     payload = _validate_change(change)
+    if coerced_target is not None:
+        await _apply_coercion()
     _mark_overrides(payload["ac1"])  # manual wins: auto stands down on these scopes
     await asyncio.to_thread(
         _activity, "you", activity.events_from_change(payload["ac1"], _zone_names())
@@ -734,19 +766,19 @@ async def set_aircon(change: AirconChange):
     # a doomed retry cycle — queue immediately.
     if not cache.ok:
         _queue_change(payload["ac1"])
-        return {"queued": True, **_state_payload()}
+        return {"queued": True, **coerced, **_state_payload()}
 
     try:
         ack = await client.set_aircon(payload)
     except EzoneError:
         _queue_change(payload["ac1"])
         cache.ok = False
-        return {"queued": True, **_state_payload()}
+        return {"queued": True, **coerced, **_state_payload()}
 
     # Respond immediately: the intent overlay covers the tablet's apply lag,
     # and the poll loop confirms (and releases) it within a cycle.
     _note_recent(payload["ac1"])
-    return {"ack": ack, "queued": False, **_state_payload()}
+    return {"ack": ack, "queued": False, **coerced, **_state_payload()}
 
 
 @app.get("/api/history")

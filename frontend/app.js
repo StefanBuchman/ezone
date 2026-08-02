@@ -229,6 +229,7 @@ function initDialDrag() {
     if (!state.local) return;
     if (e.target.closest(".dial-lock")) return; // the lock button is not a drag
     if (lock.locked) { lockedNudge(); return; }
+    if (heldForResume()) return;
     armRelock();
     dragging = true; moved = false;
     wrap.classList.add("dragging");
@@ -677,6 +678,23 @@ let lastFetch = Date.now();
 
 function setDot(cls) { $("statusDot").className = `dot ${cls}`; }
 
+/* a resumed page (backgrounded PWA, bfcache restore) may hold hours-old
+   state — most dangerously a stale auto flag, which decides whether the dial
+   writes the target or the tablet setpoint. Refresh first and hold dial
+   input until the answer lands. */
+let resumeSync = null;
+
+function refreshAfterResume() {
+  const p = fetchState(true).finally(() => { if (resumeSync === p) resumeSync = null; });
+  resumeSync = p;
+}
+
+function heldForResume() {
+  if (!resumeSync) return false;
+  toast("Catching up with the system — try again in a second.");
+  return true;
+}
+
 async function fetchState(refresh = false) {
   try {
     const res = await fetch(`/api/state${refresh ? "?refresh=1" : ""}`);
@@ -796,6 +814,12 @@ async function sendChange(change, pendingEl = null) {
       clearTimeout(confirmTimer);
       confirmTimer = setTimeout(() => fetchState(true), 4000);
     }
+    if (payload.coercedTarget !== undefined) {
+      // the server steered a stale setpoint write into the auto target;
+      // don't let checkReverts read the unchanged tablet as a rejection
+      state.sent.delete("info.setTemp");
+      toast(`Auto is on — set the target to ${fmtTemp(payload.coercedTarget)}° instead.`);
+    }
     render();
   } catch (err) {
     toast(err.message, true);
@@ -867,6 +891,7 @@ function buildControls() {
     sendChange({ info: { state: state.local.info.state === "on" ? "off" : "on" } }, $("powerBtn"));
   });
   $("autoBtn").addEventListener("click", () => {
+    if (heldForResume()) return; // stale auto flag would flip the wrong way
     sendAutoGlobal({ enabled: !autoState().enabled });
   });
 }
@@ -874,6 +899,7 @@ function buildControls() {
 function nudge(direction) {
   if (!state.local) return;
   if (lock.locked) { lockedNudge(); return; }
+  if (heldForResume()) return;
   armRelock();
   const auto = autoState();
   const step = auto.enabled ? 0.5 : 1;
@@ -1144,7 +1170,11 @@ function init() {
   setInterval(fetchTemps, 5 * 60 * 1000);
   setInterval(renderFoot, 5000);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) fetchState(true);
+    if (!document.hidden) refreshAfterResume();
+  });
+  // Safari restores from bfcache without a visibilitychange
+  window.addEventListener("pageshow", (e) => {
+    if (e.persisted) refreshAfterResume();
   });
 }
 
