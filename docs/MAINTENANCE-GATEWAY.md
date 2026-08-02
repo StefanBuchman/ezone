@@ -51,8 +51,12 @@ host**, checked in this order (later overrides earlier, both may be absent):
 Set it up once on the host (template: `maintenance-gateway.env.example`):
 
 ```bash
-sudo mkdir -p /srv/ezone && sudo install -m 600 /dev/null /srv/ezone/maintenance-gateway.env && openssl rand -hex 32
+sudo mkdir -p /srv/ezone && sudo install -m 600 /dev/null /srv/ezone/maintenance-gateway.env && openssl rand -hex 8
 ```
+
+(16 hex characters ≈ 64 bits: typeable on the wall tablet in seconds, still
+unguessable from the LAN. The collector has no rate limiting, so don't go
+below ~12 characters.)
 
 - `EZONE_COLLECTOR_TOKEN` — shared secret for `/ingest`. The same value goes
   into the Passive Tap APK. **If no env file exists, the collector still starts
