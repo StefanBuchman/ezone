@@ -1076,12 +1076,11 @@ function initActivity() {
 
 /* ================= tabs ================= */
 
-const TAB_NAMES = ["control", "activity", "system"];
+const TAB_NAMES = ["control", "activity", "trends", "system"];
 let activeTab = "control";
 const tabScroll = {}; // per-tab scroll memory (design 5b: preserve positions)
 
 function activateTab(name, via) {
-  if (name === "trends") name = "system"; // pre-5b links keep working
   if (!TAB_NAMES.includes(name)) name = "control";
   const changed = name !== activeTab;
   if (changed) tabScroll[activeTab] = window.scrollY;

@@ -157,6 +157,14 @@
       <div class="glrow"><span class="gl-lbl">Tablet filter flag</span><span class="gl-val" id="sysTabletFlag">&mdash;</span></div>
       <button class="lbl filter-btn" id="filterBtn" hidden></button>
     </section>
+  </div><!-- /tab-system -->
+
+  <!-- ================= tab · trends ================= -->
+  <div class="tab-pane" id="tab-trends" role="tabpanel" aria-label="Trends">
+    <header class="pane-hdr">
+      <div class="pane-title">Trends</div>
+      <div class="pane-note">how the house is running</div>
+    </header>
 
     <!-- 4 · today -->
     <section class="card today-card" id="todayCard" hidden>
@@ -174,7 +182,7 @@
       <svg id="tempChart" height="120" aria-label="Zone temperature over the last 24 hours"></svg>
       <div class="temps-legend" id="tempsLegend"></div>
     </section>
-  </div><!-- /tab-system -->
+  </div><!-- /tab-trends -->
 
   <!-- floating morph tab capsules (design 5b) -->
   <nav class="tabbar" role="tablist" aria-label="Sections">
@@ -189,6 +197,12 @@
         <path d="M3.5 12h3.5l3-7.5 4 15 3-7.5h3.5"/>
       </svg>
       <span class="tab-lbl">Activity</span>
+    </button>
+    <button class="tab-cap" id="tabBtn-trends" data-tab="trends" role="tab" aria-selected="false">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 19V5M4 19h16"/><path d="M7.5 14.5l3.5-4 3 2.5 4.5-6"/>
+      </svg>
+      <span class="tab-lbl">Trends</span>
     </button>
     <button class="tab-cap" id="tabBtn-system" data-tab="system" role="tab" aria-selected="false">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
