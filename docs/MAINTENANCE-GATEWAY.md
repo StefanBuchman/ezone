@@ -8,9 +8,17 @@ controller, opens a serial/USB device, transmits on CAN, or changes climate
 state — that surface belongs to the main app's guarded `/api/aircon`, and
 nothing here touches it.
 
-The implementation is vendored unchanged from the `ezone-codex` prototype
-(`maintenance-gateway/`), so captures recorded by either stack stay
+The implementation originated as a vendored copy of the `ezone-codex`
+prototype and is now maintained here; this repository's CI builds and
+publishes the image. Since Passive Tap v0.1.1 the collector is
+heartbeat-aware (see below). Capture journals recorded by either stack stay
 interchangeable.
+
+The full telemetry-path contract — AAService broadcast recovery, the
+encryption envelope, the Android bridge, validation evidence and the
+diagnostic runbook — is in
+[MAINTENANCE-TELEMETRY-HANDOFF.md](MAINTENANCE-TELEMETRY-HANDOFF.md). This
+page covers deploying and operating the collector container.
 
 ## Shape
 
@@ -34,6 +42,32 @@ interchangeable.
 the trusted LAN — do not port-forward it and do not route it through Traefik
 without the RFC1918 `ipallowlist` middleware. The app container reads `/summary`
 over the internal compose network, which is never published.
+
+### Record kinds and counters
+
+Every accepted record is journaled to `capture-*.ndjson` and updates the
+originating bridge's `lastSeen`; the kinds differ in which counters they move:
+
+| Record | Classified as | Effect |
+|--------|---------------|--------|
+| `collectorProbe` + `probeType: "aaServiceHeartbeat"` | AAService heartbeat | increments `heartbeatsReceived` and the bridge's `heartbeats`; sets `lastHeartbeatAt` (top-level and per bridge) |
+| `collectorProbe` + `probeType: "configurationTest"` | ordinary probe | increments `probesReceived` (sent by the tablet's manual Save & Test) |
+| `collectorProbe` with no `probeType` (legacy bridges) | ordinary probe | increments `probesReceived` |
+| `rawCanCiphertext` | encrypted capture | increments `encryptedMessages`, sets the bridge's `lastRawCanAt`; decoded and journaled to `frame-*.ndjson` when the key is configured |
+
+The bridge rate-limits heartbeat uploads to one every 30 seconds, so `/summary`
+reports a bridge `online` while its `lastSeen` is under **75 seconds** old (two
+missed intervals plus slack). A healthy-but-idle system shows
+`heartbeatsReceived` climbing about twice a minute while `encryptedMessages`
+and `framesReceived` stay flat — that means the Android path works and the CAN
+bus is quiet.
+
+Bridge identity fields (`appVersion`, `androidRelease`, `tabletModel`) keep
+their last non-empty value; a later record with missing metadata never erases
+what an earlier record reported. State persisted by a pre-heartbeat collector
+loads with migration-safe defaults (`heartbeatsReceived: 0`,
+`lastHeartbeatAt: null`); historical probes are not retroactively
+reclassified.
 
 ## Configuration
 
@@ -99,6 +133,11 @@ curl -s -X POST http://<docker-host-LAN-IP>:3081/ingest -H "Content-Type: applic
 A `202` with `{"ok":true,"accepted":1,"receipt":"…"}` means the path works end to
 end. `probesReceived` on `/summary` increments, and the record lands in
 `/data/capture-<date>.ndjson`.
+
+To confirm the real tablet path rather than the collector alone, watch
+`heartbeatsReceived` instead: it only moves when Passive Tap forwards a live
+AAService heartbeat, so it climbing (about twice a minute) proves the whole
+chain from AAService through the bridge to the collector.
 
 ## Backing up the diagnostic volume
 
