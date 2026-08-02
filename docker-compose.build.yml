@@ -30,9 +30,11 @@ services:
     restart: unless-stopped
     ports:
       - "${EZONE_MAINTENANCE_PORT:-3081}:8787"
-    environment:
-      EZONE_COLLECTOR_TOKEN: ${EZONE_COLLECTOR_TOKEN:?set EZONE_COLLECTOR_TOKEN in .env}
-      EZONE_BROADCAST_KEY_BASE64: ${EZONE_BROADCAST_KEY_BASE64:-}
+    env_file:
+      - path: ./.env.maintenance
+        required: false
+      - path: /srv/ezone/maintenance-gateway.env
+        required: false
     volumes:
       - ezone-maintenance-data:/data
     healthcheck:

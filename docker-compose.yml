@@ -44,10 +44,16 @@ services:
       # Trusted-LAN ingress for the tablet. Publish nothing else: /ingest is
       # bearer-token protected, /summary and /health are not (see .env.example).
       - "${EZONE_MAINTENANCE_PORT:-3081}:8787"
-    environment:
-      # Never commit real values — supply them in .env (git-ignored).
-      EZONE_COLLECTOR_TOKEN: ${EZONE_COLLECTOR_TOKEN:?set EZONE_COLLECTOR_TOKEN in .env}
-      EZONE_BROADCAST_KEY_BASE64: ${EZONE_BROADCAST_KEY_BASE64:-}
+    # Secrets (EZONE_COLLECTOR_TOKEN, EZONE_BROADCAST_KEY_BASE64) come from an
+    # env file on the HOST, never from this git-pulled yml. Either location
+    # works; later files override earlier ones. With neither present the
+    # collector still starts but refuses all ingest with 503 — check
+    # /health: "collectorTokenConfigured". See maintenance-gateway.env.example.
+    env_file:
+      - path: ./.env.maintenance                    # beside the compose file (git-ignored)
+        required: false
+      - path: /srv/ezone/maintenance-gateway.env    # fixed host path for git-synced stacks
+        required: false
     volumes:
       - ezone-maintenance-data:/data
     healthcheck:

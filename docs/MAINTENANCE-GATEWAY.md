@@ -37,21 +37,37 @@ over the internal compose network, which is never published.
 
 ## Configuration
 
-Copy `.env.example` to `.env` beside the compose file and fill it in. `.env` is
-git-ignored; real token and key values are never committed.
+The stack is designed to be git-pulled (Dockhand git-synced), so the secrets
+never pass through compose interpolation and no `.env` needs to exist in the
+checkout. The gateway loads its secrets from an **optional `env_file` on the
+host**, checked in this order (later overrides earlier, both may be absent):
+
+1. `./.env.maintenance` — beside the compose file (git-ignored); handy for
+   local runs.
+2. `/srv/ezone/maintenance-gateway.env` — fixed host path, outside the
+   checkout, survives every git-synced redeploy. **Use this on the Docker
+   host.**
+
+Set it up once on the host (template: `maintenance-gateway.env.example`):
 
 ```bash
-cp .env.example .env && openssl rand -hex 32
+sudo mkdir -p /srv/ezone && sudo install -m 600 /dev/null /srv/ezone/maintenance-gateway.env && openssl rand -hex 32
 ```
 
 - `EZONE_COLLECTOR_TOKEN` — shared secret for `/ingest`. The same value goes
-  into the Passive Tap APK. Compose refuses to start the stack if it is unset.
+  into the Passive Tap APK. **If no env file exists, the collector still starts
+  and stays healthy but answers 503 on `/ingest`** — nothing is received, and
+  `/health` reports `"collectorTokenConfigured": false`. That's the deploy
+  check: a missing secret is visible, not fatal to the climate app.
 - `EZONE_BROADCAST_KEY_BASE64` — optional decoder key. Blank is safe: captures
   are still journaled, just stored encrypted and undecoded.
-- `EZONE_MAINTENANCE_PORT` — published LAN port, default `3081`.
+- `EZONE_MAINTENANCE_PORT` — published LAN port, default `3081`
+  (compose-interpolated; override in a plain `.env` or leave the default).
 
-Rotating the token means updating `.env`, recreating the container, and entering
-the new value in the APK; captures already on the volume are unaffected.
+Rotating the token means editing the host env file, recreating the container
+(`docker compose up -d`), and entering the new value in the APK; captures on
+the volume are unaffected. The optional-`env_file` syntax needs Compose
+v2.24+.
 
 ## Health and startup order
 

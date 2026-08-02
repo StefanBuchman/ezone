@@ -4,6 +4,8 @@ __pycache__/
 data/
 .env
 .env.local
+.env.maintenance
+maintenance-gateway.env
 .claude/
 .DS_Store
 nohup.out
