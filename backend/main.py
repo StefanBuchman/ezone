@@ -79,6 +79,10 @@ offline_since: float = 0.0  # when the current tablet outage began (0 = none)
 # which point the UI honestly reverts).
 recent: list[dict] = []  # {"path": [...], "value": v, "ts": float}
 RECENT_TTL = 45
+# Queued intent has a shelf life: a "turn it on" from 10 minutes ago should
+# not fire whenever the tablet finally wakes. Expiries are logged to the
+# activity feed so a silently dropped change is never a mystery.
+PENDING_TTL = 600
 
 
 def _flatten_change(change: dict, prefix: tuple = ()) -> list[tuple]:
@@ -154,6 +158,20 @@ def _queue_change(ac_change: dict) -> None:
     _save_pending()
     if first:
         _activity("system", [("queued", {})])
+
+
+def _expire_pending() -> bool:
+    """Drop a queued change that outlived its usefulness, and say so."""
+    global pending
+    if pending is None or time.time() - pending_at <= PENDING_TTL:
+        return False
+    age = round(time.time() - pending_at)
+    paths = [".".join(p) for p, _ in _flatten_change(pending)]
+    pending = None
+    _save_pending()
+    _activity("system", [("expired", {"ageSeconds": age, "paths": paths})])
+    log.warning("queued change expired after %ss undelivered: %s", age, paths)
+    return True
 
 
 def _effective_data() -> dict | None:
@@ -537,6 +555,8 @@ async def _deliver_loop() -> None:
     while True:
         await asyncio.sleep(12)
         if pending is None:
+            continue
+        if _expire_pending():
             continue
         try:
             delivered = copy.deepcopy(pending)

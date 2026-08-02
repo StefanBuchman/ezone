@@ -98,7 +98,7 @@ available picture, assembled from three layers.
 |-------|-------|----------|-------|
 | **Observed** | `cache.data` | until the next successful poll | what the tablet last said about itself |
 | **Recent** (delivered, unconfirmed) | `recent[]` | until confirmed, or 45 s (`RECENT_TTL`) | we sent this and the tablet accepted it, but hasn't admitted it yet |
-| **Pending** (undelivered) | `pending` | until delivered | the tablet was asleep; we're holding this for it |
+| **Pending** (undelivered) | `pending` | until delivered, or 10 min (`PENDING_TTL`) | the tablet was asleep; we're holding this for it |
 
 `_effective_data()` deep-copies the observed state, applies each `recent` entry by
 path, then deep-merges `pending` on top. Everything the app exposes or reasons about
@@ -157,6 +157,14 @@ the UI can show how long it has been waiting.
 On successful delivery the pending diff is promoted to a `recent` entry, so the
 display stays stable across the handover instead of flickering back to observed
 state while the tablet catches up.
+
+Queued intent has a shelf life: if the tablet stays unreachable for 10 minutes
+(`PENDING_TTL`), the queue is dropped rather than fired at whatever moment the
+tablet finally wakes — a "turn it on" from an hour ago is no longer anyone's
+intent. The expiry is logged to the activity feed (`system` / `expired`, with the
+dropped paths and how long it was held), so a vanished change is never a mystery.
+Because the check runs inside the delivery loop, a stale `pending.json` left over
+from a restart is also expired instead of delivered.
 
 ### Cold start
 

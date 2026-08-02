@@ -282,7 +282,7 @@ composes the sentences.
 | `you` | a write made through this app |
 | `auto` | an autopilot decision or write (`calling`, `satisfied`, `suspended`, `resumed`, `drive`, `park`, `handback`, `power`, `zone`, `blocked`, `error`) |
 | `wall` | a change observed on the tablet that no app write explains — wall panel, vendor app, scenes, AA cloud (detected by diffing consecutive polls against in-flight intents) |
-| `system` | app plumbing: `queued`, `delivered`, `offline`, `online`, `timerDone` |
+| `system` | app plumbing: `queued`, `delivered`, `expired` (queued change dropped after 10 min undelivered), `offline`, `online`, `timerDone` |
 
 ```json
 {

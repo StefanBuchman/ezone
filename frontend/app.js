@@ -869,6 +869,7 @@ const ACT_GLYPHS = {
   resumed: "M5 12.5l4.5 4.5L19 7.5",
   autoMode: "M12 3.5l1.9 5.4 5.6 1.6-5.6 1.6L12 17.5l-1.9-5.4-5.6-1.6 5.6-1.6z",
   queued: "M3.5 13.5h4.6l2 3h3.8l2-3h4.6M5 6.5h14l1.5 7v5h-17v-5z",
+  expired: "M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6M12 21a8.5 8.5 0 1 1 0-17 8.5 8.5 0 0 1 0 17z",
   delivered: "M3.5 11.5L20.5 4l-7 17-2.6-7.4z",
   offline: "M4 4l16 16M8.5 15.5a5 5 0 0 1 5.2-1.2M5 12a10 10 0 0 1 3.6-2.4M15.5 8.6A10 10 0 0 1 19 12",
   online: "M5 12a10 10 0 0 1 14 0M8.5 15.5a5 5 0 0 1 7 0M12 19h.01",
@@ -906,6 +907,13 @@ function actText(e) {
     case "resumed": return [`${esc(d.name)} auto resumed`, null];
     case "queued": return ["Change queued", "tablet asleep &mdash; will deliver"];
     case "delivered": return ["Queued changes delivered", null];
+    case "expired": {
+      const what = (d.paths || [])
+        .map((p) => p.replace(/^info\./, "").replace(/^zones\./, ""))
+        .join(", ");
+      const held = fmtMins(Math.max(1, Math.round((d.ageSeconds || 0) / 60)));
+      return ["Queued change expired", `undelivered for ${held} &mdash; dropped${what ? ` (${esc(what)})` : ""}`];
+    }
     case "offline": return ["Tablet unreachable", null];
     case "online": return ["Tablet back online", d.downSeconds > 90 ? `gone ${fmtMins(Math.round(d.downSeconds / 60))}` : null];
     case "blocked": return ["Auto change blocked", esc(String(d.detail || ""))];
